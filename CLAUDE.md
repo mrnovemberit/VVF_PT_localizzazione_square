@@ -41,15 +41,26 @@ Online come destinazione, visualizzata su una webmap.
 - [x] Credenziali OAuth 2.0 "per l'autenticazione via app" create
 - [x] Bot Telegram creato via BotFather
 - [x] `app.py` scritto e testato in locale (con ngrok) end-to-end
-- [x] Verificato: scrittura e aggiornamento posizione funzionano
+- [x] Verificato: scrittura, aggiornamento e movimento in tempo reale
+      visibili sulla webmap (confermato sia in locale che in produzione)
 - [x] Filtro temporale sulla webmap ("nell'ultimi 5 minuti" su `Data_ora`)
       per nascondere chi ha smesso di condividere
-- [ ] Deploy su Render (produzione, senza dover tenere il PC acceso)
-- [ ] Registrazione webhook definitivo (URL Render, non più ngrok)
+- [x] Deploy su Render (produzione, senza dover tenere il PC acceso) —
+      live su `https://vvf-pt-localizzazione-square.onrender.com`
+- [x] Registrazione webhook definitivo (URL Render, non più ngrok)
 - [ ] Eventuale endpoint `/cleanup` per aggiornare `Status` delle feature
       scadute (opzione scartata per ora a favore del filtro webmap — vedi
       sotto, potrebbe tornare utile in futuro)
 - [ ] Test con più operatori in contemporanea
+- [ ] Verificare comportamento cold start (primo update dopo 15+ min
+      di inattività) — non ancora osservato, servizio testato solo "caldo"
+
+### Completato
+
+- **Deploy su Render e verifica end-to-end in produzione** il 08/08/2026:
+  repo GitHub privato creato, deploy Render riuscito, webhook definitivo
+  registrato, scrittura/aggiornamento/movimento confermati sia da query
+  diretta ArcGIS che visivamente sulla webmap.
 
 ## Decisioni prese (e perché)
 
@@ -69,6 +80,9 @@ Online come destinazione, visualizzata su una webmap.
 - **Nomi campo sul layer**: attenzione, `Data_ora` non `Timestamp`
   (il nome "Timestamp" è riservato/sconsigliato in ArcGIS). Vedi sezione
   "Campi Feature Layer" sotto per l'elenco completo e aggiornato.
+- **Repository GitHub privato**: `CLAUDE.md` contiene l'URL reale del
+  Feature Layer ArcGIS, quindi il repo è privato invece che pubblico
+  (riguarda posizioni in tempo reale di operatori durante interventi).
 
 ## Campi Feature Layer (`Posizione_partenze_PT`)
 
@@ -88,7 +102,10 @@ https://services3.arcgis.com/MfVi0khS4tCyLmo3/arcgis/rest/services/Posizione_par
 ## Stack tecnico
 
 - Python 3, Flask, libreria `requests`
-- Deploy previsto: Render (piano free, servizio web)
+- Deploy: Render (piano free, servizio web), region Frankfurt — live su
+  `https://vvf-pt-localizzazione-square.onrender.com`
+- Repository: `https://github.com/mrnovemberit/VVF_PT_localizzazione_square`
+  (privato)
 - Nessun framework ORM: chiamate REST dirette alle API ArcGIS
 - Test locale: `ngrok` per esporre temporaneamente il webhook
 

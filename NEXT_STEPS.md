@@ -2,24 +2,17 @@
 
 In ordine di priorità:
 
-1. **Deploy su Render**
-   - Creare repository Git (GitHub) con i file del progetto (escluso `.env`)
-   - Collegare il repo su Render come Web Service, piano free
-   - Build command: `pip install -r requirements.txt`
-   - Start command: `gunicorn app:app`
-   - Impostare le environment variable su Render (stessi valori di `.env` locale)
+1. ~~**Deploy su Render**~~ — fatto 08/08/2026, live su
+   `https://vvf-pt-localizzazione-square.onrender.com`
 
-2. **Registrare il webhook definitivo**
-   - Una volta attivo il servizio Render, usare `setup_webhook.py` con
-     l'URL Render (non più ngrok)
-   - Verificare con `getWebhookInfo` che sia tutto corretto
+2. ~~**Registrare il webhook definitivo**~~ — fatto 08/08/2026,
+   `getWebhookInfo` verificato
 
-3. **Test end-to-end su Render**
-   - Ripetere il test di condivisione posizione live da Telegram
-   - Verificare nei log di Render (dashboard, sezione "Logs") che gli
-     update arrivino e vengano scritti su ArcGIS
-   - Controllare il comportamento del cold start (primo update dopo
-     inattività)
+3. **Cold start**
+   - Non ancora osservato: il servizio è stato testato solo "caldo"
+     (appena distribuito). Aspettare 15-20 min di inattività, poi
+     condividere di nuovo la posizione e controllare quanto impiega
+     il primo update ad arrivare
 
 4. **Test con più operatori**
    - Verificare che 2+ persone che condividono contemporaneamente
