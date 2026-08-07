@@ -109,6 +109,11 @@ https://services3.arcgis.com/MfVi0khS4tCyLmo3/arcgis/rest/services/Posizione_par
 - Nessun framework ORM: chiamate REST dirette alle API ArcGIS
 - Test locale: `ngrok` per esporre temporaneamente il webhook
 
+## Link Notion
+
+- Pagina progetto: https://www.notion.so/VVF_PT-Localizzazione-squadre-3b5f8600d25180e3800cfa04b8b4087d
+- Diario sessioni: https://app.notion.com/p/3b5f8600d2518152b176cc4a02c17aed
+
 ## Convenzioni
 
 - Commenti e log in italiano (coerente con il resto del progetto)
