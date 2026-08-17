@@ -93,6 +93,8 @@ Online come destinazione, visualizzata su una webmap.
 | Data_ora | Date | Ultimo aggiornamento posizione (usato dal filtro webmap) |
 | LiveUntil | Date | Scadenza prevista sessione live (calcolato da `live_period`, non ancora sfruttato attivamente) |
 | Status | Text | Sempre "live" per ora (nessuna logica di scadenza lato codice) |
+| Direzione | Double | Direzione di marcia in gradi (0-360, da `heading` Telegram, solo se il telefono si muove) |
+| Precisione_m | Double | Raggio di incertezza GPS in metri (da `horizontal_accuracy` Telegram) |
 
 URL REST del layer (indice `/0` incluso, importante):
 ```

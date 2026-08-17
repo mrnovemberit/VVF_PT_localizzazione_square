@@ -92,7 +92,8 @@ def find_existing_object_id(operator_id: str):
     return None
 
 
-def upsert_position(operator_id: str, operator_name: str, lat: float, lon: float, live_period=None):
+def upsert_position(operator_id: str, operator_name: str, lat: float, lon: float,
+                     live_period=None, heading=None, horizontal_accuracy=None):
     """Crea o aggiorna la posizione dell'operatore sul Feature Layer."""
     token = get_arcgis_token()
     now_ms = int(time.time() * 1000)
@@ -106,6 +107,10 @@ def upsert_position(operator_id: str, operator_name: str, lat: float, lon: float
     }
     if live_until_ms:
         attributes["LiveUntil"] = live_until_ms
+    if heading is not None:
+        attributes["Direzione"] = heading
+    if horizontal_accuracy is not None:
+        attributes["Precisione_m"] = horizontal_accuracy
 
     geometry = {"x": lon, "y": lat, "spatialReference": {"wkid": 4326}}
 
@@ -181,9 +186,12 @@ def telegram_webhook():
     lat = location["latitude"]
     lon = location["longitude"]
     live_period = location.get("live_period")  # presente solo nel primo messaggio
+    heading = location.get("heading")
+    horizontal_accuracy = location.get("horizontal_accuracy")
 
     try:
-        upsert_position(operator_id, operator_name, lat, lon, live_period)
+        upsert_position(operator_id, operator_name, lat, lon, live_period,
+                         heading, horizontal_accuracy)
     except Exception:
         log.exception("Errore scrivendo su ArcGIS")
         return jsonify({"ok": False}), 500
