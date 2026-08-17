@@ -95,6 +95,8 @@ Online come destinazione, visualizzata su una webmap.
 | Status | Text | Sempre "live" per ora (nessuna logica di scadenza lato codice) |
 | Direzione | Double | Direzione di marcia in gradi (0-360, da `heading` Telegram, solo se il telefono si muove) |
 | Precisione_m | Double | Raggio di incertezza GPS in metri (da `horizontal_accuracy` Telegram) |
+| Latitudine | Double | Latitudine (duplicata anche in `geometry`, comoda per lettura/export in tabella) |
+| Longitudine | Double | Longitudine (duplicata anche in `geometry`, comoda per lettura/export in tabella) |
 
 URL REST del layer (indice `/0` incluso, importante):
 ```

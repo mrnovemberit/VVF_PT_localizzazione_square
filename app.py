@@ -104,6 +104,8 @@ def upsert_position(operator_id: str, operator_name: str, lat: float, lon: float
         "OperatorName": operator_name,
         "Data_ora": now_ms,
         "Status": "live",
+        "Latitudine": lat,
+        "Longitudine": lon,
     }
     if live_until_ms:
         attributes["LiveUntil"] = live_until_ms
