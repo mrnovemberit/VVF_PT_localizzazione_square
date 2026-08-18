@@ -6,6 +6,7 @@ sul Feature Layer ArcGIS Online tramite l'endpoint REST applyEdits.
 
 import os
 import time
+import math
 import logging
 from flask import Flask, request, jsonify
 import requests
@@ -66,19 +67,20 @@ def get_arcgis_token() -> str:
 # ---------------------------------------------------------------------------
 # Operazioni sul Feature Layer
 # ---------------------------------------------------------------------------
-def find_existing_object_id(operator_id: str):
+def find_existing_feature(operator_id: str):
     """
-    Cerca se esiste già una feature per questo operatore.
-    Interroghiamo direttamente ArcGIS ad ogni update (niente storage
-    esterno da mantenere) - per il volume di richieste di questo progetto
-    è pienamente sufficiente.
+    Cerca se esiste già una feature per questo operatore, e in tal caso
+    restituisce anche la sua ultima posizione nota (serve per calcolare
+    lo spostamento rispetto al nuovo update). Interroghiamo direttamente
+    ArcGIS ad ogni update (niente storage esterno da mantenere) - per il
+    volume di richieste di questo progetto è pienamente sufficiente.
     """
     token = get_arcgis_token()
     resp = requests.get(
         f"{ARCGIS_FEATURE_LAYER_URL}/query",
         params={
             "where": f"OperatorID='{operator_id}'",
-            "outFields": "OBJECTID",
+            "outFields": "OBJECTID,Latitudine,Longitudine",
             "f": "json",
             "token": token,
         },
@@ -88,8 +90,18 @@ def find_existing_object_id(operator_id: str):
     data = resp.json()
     features = data.get("features", [])
     if features:
-        return features[0]["attributes"]["OBJECTID"]
+        return features[0]["attributes"]
     return None
+
+
+def distanza_metri(lat1, lon1, lat2, lon2):
+    """Distanza approssimata in metri tra due coordinate (formula di Haversine)."""
+    raggio_terra = 6371000
+    phi1, phi2 = math.radians(lat1), math.radians(lat2)
+    dphi = math.radians(lat2 - lat1)
+    dlambda = math.radians(lon2 - lon1)
+    a = math.sin(dphi / 2) ** 2 + math.cos(phi1) * math.cos(phi2) * math.sin(dlambda / 2) ** 2
+    return 2 * raggio_terra * math.asin(math.sqrt(a))
 
 
 def upsert_position(operator_id: str, operator_name: str, lat: float, lon: float,
@@ -99,11 +111,26 @@ def upsert_position(operator_id: str, operator_name: str, lat: float, lon: float
     now_ms = int(time.time() * 1000)
     live_until_ms = now_ms + (live_period * 1000) if live_period else None
 
+    existing = find_existing_feature(operator_id)
+
+    # Soglia dinamica: almeno 15m, o il doppio della precisione GPS se questa
+    # è più larga (evita falsi "in movimento" per il solo rumore del GPS)
+    if existing and existing.get("Latitudine") is not None and existing.get("Longitudine") is not None:
+        soglia = max(15.0, 2 * horizontal_accuracy) if horizontal_accuracy else 15.0
+        distanza = distanza_metri(existing["Latitudine"], existing["Longitudine"], lat, lon)
+        moving_status = "in movimento" if distanza > soglia else "fermo"
+        log.info("Operatore %s: distanza %.1fm, soglia %.1fm -> %s",
+                  operator_id, distanza, soglia, moving_status)
+    else:
+        # Prima posizione ricevuta, non c'è ancora un punto precedente da confrontare
+        moving_status = "fermo"
+
     attributes = {
         "OperatorID": operator_id,
         "OperatorName": operator_name,
         "Data_ora": now_ms,
         "Status": "live",
+        "Moving_status": moving_status,
         "Latitudine": lat,
         "Longitudine": lon,
     }
@@ -116,12 +143,10 @@ def upsert_position(operator_id: str, operator_name: str, lat: float, lon: float
 
     geometry = {"x": lon, "y": lat, "spatialReference": {"wkid": 4326}}
 
-    existing_oid = find_existing_object_id(operator_id)
-
-    if existing_oid:
+    if existing:
         payload = {
             "updates": [{
-                "attributes": {**attributes, "OBJECTID": existing_oid},
+                "attributes": {**attributes, "OBJECTID": existing["OBJECTID"]},
                 "geometry": geometry,
             }]
         }

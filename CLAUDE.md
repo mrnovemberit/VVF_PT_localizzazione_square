@@ -54,6 +54,9 @@ Online come destinazione, visualizzata su una webmap.
 - [ ] Test con più operatori in contemporanea
 - [ ] Verificare comportamento cold start (primo update dopo 15+ min
       di inattività) — non ancora osservato, servizio testato solo "caldo"
+- [ ] Campo `Moving_status` (fermo/in movimento) aggiunto in `app.py`
+      (18/08/2026) — manca ancora: creare il campo Text sul Feature Layer
+      su ArcGIS Online e impostare il renderer "Valori unici" sulla webmap
 
 ### Completato
 
@@ -93,6 +96,7 @@ Online come destinazione, visualizzata su una webmap.
 | Data_ora | Date | Ultimo aggiornamento posizione (usato dal filtro webmap) |
 | LiveUntil | Date | Scadenza prevista sessione live (calcolato da `live_period`, non ancora sfruttato attivamente) |
 | Status | Text | Sempre "live" per ora (nessuna logica di scadenza lato codice) |
+| Moving_status | Text | "in movimento" / "fermo", calcolato in `app.py` confrontando la nuova posizione con l'ultima nota (soglia dinamica: 15m o 2× `Precisione_m` se più larga) |
 | Direzione | Double | Direzione di marcia in gradi (0-360, da `heading` Telegram, solo se il telefono si muove) |
 | Precisione_m | Double | Raggio di incertezza GPS in metri (da `horizontal_accuracy` Telegram) |
 | Latitudine | Double | Latitudine (duplicata anche in `geometry`, comoda per lettura/export in tabella) |
