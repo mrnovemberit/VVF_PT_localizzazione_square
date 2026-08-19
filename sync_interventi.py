@@ -21,6 +21,7 @@ import json
 import time
 import hashlib
 import logging
+import logging.handlers
 import argparse
 import xml.etree.ElementTree as ET
 from functools import partial
@@ -238,6 +239,25 @@ def elabora(cartella, layer_url, forza=False, dry_run=False):
         _stato["hash"][percorso] = impronta
 
 
+def configura_log_su_file():
+    """
+    Aggiunge un file di log accanto allo script.
+
+    Lanciato dall'Utilita' di pianificazione con pythonw.exe non c'e' nessuna
+    console: senza questo, in caso di problemi non resterebbe traccia di
+    niente. Il file ruota da solo, non serve manutenzione.
+    """
+    percorso = os.environ.get("LOG_FILE") or os.path.join(
+        CARTELLA_SCRIPT, "sync_interventi.log"
+    )
+    handler = logging.handlers.RotatingFileHandler(
+        percorso, maxBytes=1_000_000, backupCount=3, encoding="utf-8"
+    )
+    handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s"))
+    logging.getLogger().addHandler(handler)
+    return percorso
+
+
 def main():
     carica_env_locale()
 
@@ -265,7 +285,9 @@ def main():
         elabora(cartella, layer_url, forza=True, dry_run=args.dry_run)
         return
 
-    log.info("Sorveglio %s ogni %s secondi", cartella, args.intervallo)
+    percorso_log = configura_log_su_file()
+    log.info("Sorveglio %s ogni %s secondi (log in %s)",
+             cartella, args.intervallo, percorso_log)
     while True:
         try:
             elabora(cartella, layer_url)
