@@ -1,0 +1,5 @@
+# Dipendenze del solo sincronizzatore interventi (sync_interventi.py).
+# Sul PC del comando non servono Flask e gunicorn: quelli riguardano il
+# ponte Telegram, che gira su Render.
+requests==2.32.3
+tzdata==2024.1

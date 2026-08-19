@@ -9,7 +9,8 @@ import time
 import math
 import logging
 from flask import Flask, request, jsonify
-import requests
+
+from arcgis_client import query_features, apply_edits
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("bridge")
@@ -20,48 +21,19 @@ app = Flask(__name__)
 # Configurazione (letta da variabili d'ambiente, mai hardcoded nel codice)
 # ---------------------------------------------------------------------------
 TELEGRAM_BOT_TOKEN = os.environ["TELEGRAM_BOT_TOKEN"]
-ARCGIS_CLIENT_ID = os.environ["ARCGIS_CLIENT_ID"]
-ARCGIS_CLIENT_SECRET = os.environ["ARCGIS_CLIENT_SECRET"]
 ARCGIS_FEATURE_LAYER_URL = os.environ["ARCGIS_FEATURE_LAYER_URL"].rstrip("/")
 # Es: https://services.arcgis.com/XXXX/arcgis/rest/services/Posizione_partenze2_PT/FeatureServer/0
+
+# Le credenziali OAuth le legge arcgis_client al momento del bisogno; qui
+# controlliamo solo che siano impostate, così un errore di configurazione
+# emerge all'avvio del servizio e non al primo update ricevuto.
+for _chiave in ("ARCGIS_CLIENT_ID", "ARCGIS_CLIENT_SECRET"):
+    if not os.environ.get(_chiave):
+        raise RuntimeError(f"Variabile d'ambiente mancante: {_chiave}")
 
 # Un token segreto a tua scelta, usato per verificare che le richieste al
 # webhook arrivino davvero da Telegram e non da terzi (vedi setWebhook più sotto)
 WEBHOOK_SECRET = os.environ.get("WEBHOOK_SECRET", "")
-
-# Cache in memoria del token OAuth ArcGIS (evitiamo di richiederlo ad ogni update)
-_token_cache = {"access_token": None, "expires_at": 0}
-
-
-# ---------------------------------------------------------------------------
-# Autenticazione ArcGIS (OAuth2 - app authentication, client_credentials)
-# ---------------------------------------------------------------------------
-def get_arcgis_token() -> str:
-    """Restituisce un token ArcGIS valido, rinnovandolo solo se necessario."""
-    now = time.time()
-    if _token_cache["access_token"] and now < _token_cache["expires_at"] - 60:
-        return _token_cache["access_token"]
-
-    resp = requests.post(
-        "https://www.arcgis.com/sharing/rest/oauth2/token",
-        data={
-            "client_id": ARCGIS_CLIENT_ID,
-            "client_secret": ARCGIS_CLIENT_SECRET,
-            "grant_type": "client_credentials",
-            "f": "json",
-        },
-        timeout=15,
-    )
-    resp.raise_for_status()
-    data = resp.json()
-
-    if "error" in data:
-        raise RuntimeError(f"Errore token ArcGIS: {data['error']}")
-
-    _token_cache["access_token"] = data["access_token"]
-    _token_cache["expires_at"] = now + data["expires_in"]
-    log.info("Nuovo token ArcGIS ottenuto, valido %s secondi", data["expires_in"])
-    return _token_cache["access_token"]
 
 
 # ---------------------------------------------------------------------------
@@ -75,23 +47,12 @@ def find_existing_feature(operator_id: str):
     ArcGIS ad ogni update (niente storage esterno da mantenere) - per il
     volume di richieste di questo progetto è pienamente sufficiente.
     """
-    token = get_arcgis_token()
-    resp = requests.get(
-        f"{ARCGIS_FEATURE_LAYER_URL}/query",
-        params={
-            "where": f"OperatorID='{operator_id}'",
-            "outFields": "OBJECTID,Latitudine,Longitudine",
-            "f": "json",
-            "token": token,
-        },
-        timeout=15,
+    trovate = query_features(
+        ARCGIS_FEATURE_LAYER_URL,
+        where=f"OperatorID='{operator_id}'",
+        out_fields="OBJECTID,Latitudine,Longitudine",
     )
-    resp.raise_for_status()
-    data = resp.json()
-    features = data.get("features", [])
-    if features:
-        return features[0]["attributes"]
-    return None
+    return trovate[0] if trovate else None
 
 
 def distanza_metri(lat1, lon1, lat2, lon2):
@@ -107,7 +68,6 @@ def distanza_metri(lat1, lon1, lat2, lon2):
 def upsert_position(operator_id: str, operator_name: str, lat: float, lon: float,
                      live_period=None, heading=None, horizontal_accuracy=None):
     """Crea o aggiorna la posizione dell'operatore sul Feature Layer."""
-    token = get_arcgis_token()
     now_ms = int(time.time() * 1000)
     live_until_ms = now_ms + (live_period * 1000) if live_period else None
 
@@ -143,39 +103,13 @@ def upsert_position(operator_id: str, operator_name: str, lat: float, lon: float
 
     geometry = {"x": lon, "y": lat, "spatialReference": {"wkid": 4326}}
 
+    feature = {"attributes": attributes, "geometry": geometry}
     if existing:
-        payload = {
-            "updates": [{
-                "attributes": {**attributes, "OBJECTID": existing["OBJECTID"]},
-                "geometry": geometry,
-            }]
-        }
-        edit_url = f"{ARCGIS_FEATURE_LAYER_URL}/applyEdits"
+        feature["attributes"]["OBJECTID"] = existing["OBJECTID"]
+        result = apply_edits(ARCGIS_FEATURE_LAYER_URL, updates=[feature])
     else:
-        payload = {
-            "adds": [{
-                "attributes": attributes,
-                "geometry": geometry,
-            }]
-        }
-        edit_url = f"{ARCGIS_FEATURE_LAYER_URL}/applyEdits"
+        result = apply_edits(ARCGIS_FEATURE_LAYER_URL, adds=[feature])
 
-    resp = requests.post(
-        edit_url,
-        data={
-            "f": "json",
-            "token": token,
-            **{k: __import__("json").dumps(v) for k, v in payload.items()},
-        },
-        timeout=15,
-    )
-    log.info("applyEdits status HTTP: %s", resp.status_code)
-    log.info("applyEdits URL chiamato: %s", edit_url)
-    log.info("applyEdits risposta grezza: %s", resp.text)
-    resp.raise_for_status()
-    result = resp.json()
-    if isinstance(result, dict) and "error" in result:
-        log.error("ArcGIS ha risposto con un errore: %s", result["error"])
     log.info("Risultato applyEdits per %s: %s", operator_id, result)
     return result
 

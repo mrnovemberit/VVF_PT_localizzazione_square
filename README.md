@@ -1,6 +1,16 @@
-# Telegram → ArcGIS Bridge
+# Dashboard operativa VVF Pistoia → ArcGIS
 
-Riceve le posizioni live condivise su Telegram e le scrive su un Feature Layer ArcGIS Online.
+Due flussi di dati verso la stessa dashboard ArcGIS del comando:
+
+1. **Posizioni delle partenze** (`app.py`) — riceve le posizioni live condivise
+   su Telegram e le scrive su un Feature Layer ArcGIS Online. È il servizio
+   ospitato su Render, documentato qui sotto.
+2. **Interventi e chiamate** (`sync_interventi.py`) — legge gli XML rigenerati
+   dal software Oracle di gestione interventi del comando e riallinea un
+   secondo Feature Layer. Gira sulla macchina che vede quella cartella, non su
+   Render: **istruzioni in [`LAYER_INTERVENTI.md`](LAYER_INTERVENTI.md)**.
+
+I due flussi condividono `arcgis_client.py` (token OAuth2 e `applyEdits`).
 
 ## 1. Test in locale (opzionale, consigliato prima del deploy)
 
@@ -62,3 +72,20 @@ Verifica che la risposta contenga `"ok": true` e che `getWebhookInfo` mostri l'U
 - **Cold start**: il piano free di Render sospende il servizio dopo 15 minuti di inattività. Il primo update dopo una pausa lunga può impiegare 30-60 secondi prima di essere processato.
 - **Nessuno storage esterno**: la mappa "operatore → feature esistente" viene ricalcolata ad ogni update interrogando ArcGIS (query su `OperatorID`). Per il volume di questo progetto è sufficiente e non richiede database aggiuntivi.
 - **Sicurezza**: mai committare `.env` o il file con Client Secret / Bot Token nel repository.
+- **Dati personali**: `parser_xml.py` non legge i campi con nome, cognome e
+  telefono presenti negli XML — restano fuori dal Feature Layer per
+  costruzione, non per filtro. Gli XML in `esempi/` sono anonimizzati.
+
+## File del progetto
+
+| File | A cosa serve |
+|---|---|
+| `app.py` | Webhook Telegram → posizioni sul layer (servizio su Render) |
+| `arcgis_client.py` | Token OAuth2, query e `applyEdits`, condivisi dai due flussi |
+| `parser_xml.py` | Lettura e normalizzazione degli XML Oracle, senza rete |
+| `sync_interventi.py` | Sorveglianza cartella e riallineamento del layer interventi |
+| `verifica_campi.py` | Controlla che il layer interventi abbia i 25 campi giusti |
+| `prova_riallineamento.py` | Prove su ArcGIS simulato: `python prova_riallineamento.py` |
+| `esempi/` | XML di esempio anonimizzati, usati dalle prove |
+| `LAYER_INTERVENTI.md` | Creazione del layer interventi e messa in esercizio |
+| `setup_webhook.py` | Registrazione del webhook Telegram |

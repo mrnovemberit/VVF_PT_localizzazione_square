@@ -1,13 +1,18 @@
-# Progetto: Tracking posizione VVF via Telegram → ArcGIS
+# Progetto: Dashboard operativa VVF Pistoia su ArcGIS
 
 ## Scopo
 
-Sistema per tracciare in tempo reale la posizione GPS di 4-5 operatori
-(telefoni cellulari) durante gli interventi, usando la funzione "Posizione
-in tempo reale" di Telegram come sorgente dati e una Feature Layer ArcGIS
-Online come destinazione, visualizzata su una webmap.
+Dashboard ArcGIS del comando provinciale, alimentata da due flussi
+indipendenti e complementari:
 
-## Architettura
+1. **Posizioni delle partenze** — posizione GPS in tempo reale di 4-5
+   operatori tramite la funzione "Posizione in tempo reale" di Telegram.
+2. **Interventi e chiamate** — stato operativo provinciale letto dagli XML
+   che il software Oracle del comando rigenera ad ogni modifica, invece che
+   dal dato redistribuito dal centro nazionale (inaffidabile: interventi
+   chiusi che restano appesi, buchi temporali, probabili crash a monte).
+
+## Architettura — flusso 1: posizioni Telegram
 
 ```
 [Operatore] --condivide posizione live--> [Bot Telegram]
@@ -24,42 +29,79 @@ Online come destinazione, visualizzata su una webmap.
                                           [Webmap]
 ```
 
-- Il bot Telegram è solo un "recapito": non elabora nulla, inoltra gli
-  update a `app.py` via webhook.
-- `app.py` distingue `message.location` (prima condivisione, contiene
+- Il bot Telegram è solo un "recapito": inoltra gli update a `app.py` via
+  webhook, che distingue `message.location` (prima condivisione, con
   `live_period`) da `edited_message.location` (aggiornamenti successivi).
-- Per ogni update, l'app cerca se esiste già una feature per quell'
-  `OperatorID` (query diretta su ArcGIS, niente storage esterno) e fa
-  `applyEdits` di add o update di conseguenza — un solo punto per
-  operatore, che si sposta, non si accumula.
-- Autenticazione ArcGIS: OAuth2 **app authentication** (client_credentials),
-  non serve login umano interattivo.
+- Per ogni update, l'app cerca la feature per `OperatorID` (query diretta su
+  ArcGIS, niente storage esterno) e fa `applyEdits` di add o update — un
+  solo punto per operatore, che si sposta, non si accumula.
+- Autenticazione OAuth2 **app authentication**, logica condivisa con il
+  flusso 2 in `arcgis_client.py`.
+
+## Architettura — flusso 2: interventi da XML Oracle
+
+```
+[Software Oracle] --rigenera ad ogni modifica--> [2 XML in una cartella]
+                                                          |
+                                          (sync_interventi.py, in polling)
+                                                          v
+                                       parsing + riallineamento del layer
+                                                          |
+                                              (OAuth2 + REST applyEdits)
+                                                          v
+                                    [Feature Layer Interventi_chiamate_PT]
+```
+
+- Riallineamento e guardie: vedi **Decisioni prese** sotto.
+- File suddivisi per responsabilità: `parser_xml.py` (solo lettura e
+  normalizzazione, nessuna rete, collaudabile a secco), `sync_interventi.py`
+  (rilevazione modifiche, riallineamento, ciclo, log su file), `arcgis_client.py`
+  (rete: token, query, applyEdits, descrivi_layer), `verifica_campi.py`
+  (controlla i 25 campi del layer prima di scriverci).
+- Vedi **`LAYER_INTERVENTI.md`** per la creazione del layer, i 25 campi da
+  creare a mano, la configurazione e l'installazione sul PC del comando.
 
 ## Stato attuale del progetto
 
-- [x] Feature Layer creato su ArcGIS Online (`Posizione_partenze_PT`)
-- [x] Credenziali OAuth 2.0 "per l'autenticazione via app" create
-- [x] Bot Telegram creato via BotFather
-- [x] `app.py` scritto e testato in locale (con ngrok) end-to-end
-- [x] Verificato: scrittura, aggiornamento e movimento in tempo reale
-      visibili sulla webmap (confermato sia in locale che in produzione)
-- [x] Filtro temporale sulla webmap ("nell'ultimi 5 minuti" su `Data_ora`)
-      per nascondere chi ha smesso di condividere
-- [x] Deploy su Render (produzione, senza dover tenere il PC acceso) —
-      live su `https://vvf-pt-localizzazione-square.onrender.com`
-- [x] Registrazione webhook definitivo (URL Render, non più ngrok)
-- [ ] Eventuale endpoint `/cleanup` per aggiornare `Status` delle feature
-      scadute (opzione scartata per ora a favore del filtro webmap — vedi
-      sotto, potrebbe tornare utile in futuro)
+- [x] Feature Layer, credenziali OAuth e bot Telegram creati; `app.py`
+      testato end-to-end (locale con ngrok e produzione)
+- [x] Filtro webmap "ultimi 5 minuti" su `Data_ora` per nascondere chi ha
+      smesso di condividere
+- [x] Deploy su Render, webhook definitivo registrato — live su
+      `https://vvf-pt-localizzazione-square.onrender.com`
+- [ ] Endpoint `/cleanup` per `Status` scaduti — scartato per ora a favore
+      del filtro webmap, potrebbe servire in futuro
 - [ ] Test con più operatori in contemporanea
-- [ ] Verificare comportamento cold start (primo update dopo 15+ min
-      di inattività) — non ancora osservato, servizio testato solo "caldo"
-- [ ] Campo `Moving_status` (fermo/in movimento) aggiunto in `app.py`
-      (18/08/2026) — manca ancora: creare il campo Text sul Feature Layer
-      su ArcGIS Online e impostare il renderer "Valori unici" sulla webmap
+- [ ] Verificare il cold start (mai osservato, servizio testato solo "caldo")
+- [ ] Campo `Moving_status` (18/08/2026): creare il campo sul layer e il
+      renderer "Valori unici" sulla webmap
+
+### Flusso 2 — interventi da XML Oracle (avviato 19/08/2026)
+
+- [x] Struttura XML analizzata; `parser_xml.py`, `sync_interventi.py`,
+      `arcgis_client.py`, `verifica_campi.py` scritti; `app.py`
+      rifattorizzato per usare `arcgis_client.py` condiviso
+- [x] Collaudo a secco: 8 prove su ArcGIS simulato, tutte superate
+      (`prova_riallineamento.py`)
+- [x] Layer `Interventi_chiamate_PT` creato (25 campi, privato); prima
+      scrittura reale riuscita, 3 feature visibili sulla webmap
+- [x] Cartella XML sul PC del comando individuata; installazione preparata
+      (`avvia_sync.bat`, `requirements-sync.txt`, log su file con rotazione)
+- [ ] Autorizzazione del referente informatico per la macchina del comando
+      — **rimandata a domani**
+- [ ] Installare e collaudare sul PC del comando (`--dry-run` sui file veri
+      per primo, poi `--once`, poi l'Attività pianificata)
+- [ ] Vestizione webmap a valori unici su `Stato_operativo`
+- [ ] Tabella di decodifica di `COD_TIPOLOGIA` (le chiamate mostrano per
+      ora "Codice NN")
+- [ ] Vocabolario di `STATUS` (`A` = aperto è un'ipotesi); valorizzare
+      `STATI_CHIUSI` se emergono altri codici
 
 ### Completato
 
+- **Flusso 2 (interventi da XML Oracle) funzionante end-to-end in locale**
+  il 19/08/2026: parser, sincronizzatore, layer creato, primo test di
+  scrittura riuscito sugli esempi. Dettagli nel diario.
 - **Deploy su Render e verifica end-to-end in produzione** il 08/08/2026:
   repo GitHub privato creato, deploy Render riuscito, webhook definitivo
   registrato, scrittura/aggiornamento/movimento confermati sia da query
@@ -67,27 +109,37 @@ Online come destinazione, visualizzata su una webmap.
 
 ## Decisioni prese (e perché)
 
-- **Niente database esterno per la mappa operatore→feature**: si
-  interroga ArcGIS ad ogni update (`find_existing_object_id`). Per il
-  volume atteso (4-5 operatori, update ogni ~25-30s) è ampiamente
-  sufficiente e evita il problema della persistenza (il filesystem di
-  Render free non è persistente tra riavvii).
-- **Pulizia "scaduti" via filtro webmap, non lato codice**: invece di un
-  cron job che aggiorna `Status`, si usa un filtro Map Viewer
-  (`Data_ora` "nell'ultimi 5 minuti") — zero manutenzione, si basa
-  sull'ultimo aggiornamento reale ricevuto, comportamento più
-  affidabile in caso di telefono senza segnale.
-- **Render free accettato nonostante il cold start**: 30-60s di
-  risveglio dopo 15 min di inattività è stato validato come accettabile
-  per l'uso previsto.
-- **Nomi campo sul layer**: attenzione, `Data_ora` non `Timestamp`
-  (il nome "Timestamp" è riservato/sconsigliato in ArcGIS). Vedi sezione
-  "Campi Feature Layer" sotto per l'elenco completo e aggiornato.
+- **Niente database esterno per la mappa operatore→feature**: si interroga
+  ArcGIS ad ogni update. Per 4-5 operatori è sufficiente ed evita il problema
+  della persistenza (il filesystem di Render free non sopravvive ai riavvii).
+- **Pulizia "scaduti" via filtro webmap** (`Data_ora` "ultimi 5 minuti"),
+  non un cron job lato codice: zero manutenzione, più affidabile in caso di
+  telefono senza segnale.
+- **Render free accettato nonostante il cold start**: 30-60s di risveglio
+  dopo 15 min di inattività, validato come accettabile per l'uso previsto.
+- **Nomi campo sul layer**: `Data_ora`, non `Timestamp` (riservato in ArcGIS).
+- **XML locali invece del dato del centro nazionale**: il software Oracle del
+  comando scrive uno snapshot completo ad ogni modifica. Elimina i difetti
+  del dato ridistribuito (interventi appesi, buchi temporali, crash a monte).
+- **Riallineamento invece di inseguire gli eventi**: poiché ogni XML è una
+  fotografia completa, non serve ricostruire cosa è cambiato — si porta il
+  layer a coincidere col file (`adds`/`updates`/`deletes`). Anche saltando
+  dei cicli, il layer non può divergere dalla realtà. Stessa filosofia del
+  "niente storage esterno" già adottata per le posizioni. Due guardie: il
+  riallineamento è **per fase** (i due XML sono file distinti, elaborando le
+  chiamate non si toccano le feature degli interventi), e serve una
+  **seconda lettura vuota consecutiva** prima di cancellare tutto — un file
+  troncato mentre Oracle lo riscrive non può svuotare la mappa.
+- **Dati personali esclusi in fase di parsing, non filtrati sulla mappa**: un
+  dato mai caricato non può essere esposto da un errore di condivisione.
+- **Un solo layer per chiamate e interventi**, distinti dal campo `Fase`:
+  la vestizione a valori unici e i filtri della webmap fanno il resto, come
+  già si fa con `Moving_status`.
 - **Repository GitHub privato**: `CLAUDE.md` contiene l'URL reale del
   Feature Layer ArcGIS, quindi il repo è privato invece che pubblico
   (riguarda posizioni in tempo reale di operatori durante interventi).
 
-## Campi Feature Layer (`Posizione_partenze_PT`)
+## Campi Feature Layer 1 (`Posizione_partenze_PT`)
 
 | Campo | Tipo | Note |
 |---|---|---|
@@ -96,16 +148,25 @@ Online come destinazione, visualizzata su una webmap.
 | Data_ora | Date | Ultimo aggiornamento posizione (usato dal filtro webmap) |
 | LiveUntil | Date | Scadenza prevista sessione live (calcolato da `live_period`, non ancora sfruttato attivamente) |
 | Status | Text | Sempre "live" per ora (nessuna logica di scadenza lato codice) |
-| Moving_status | Text | "in movimento" / "fermo", calcolato in `app.py` confrontando la nuova posizione con l'ultima nota (soglia dinamica: 15m o 2× `Precisione_m` se più larga) |
-| Direzione | Double | Direzione di marcia in gradi (0-360, da `heading` Telegram, solo se il telefono si muove) |
-| Precisione_m | Double | Raggio di incertezza GPS in metri (da `horizontal_accuracy` Telegram) |
-| Latitudine | Double | Latitudine (duplicata anche in `geometry`, comoda per lettura/export in tabella) |
-| Longitudine | Double | Longitudine (duplicata anche in `geometry`, comoda per lettura/export in tabella) |
+| Moving_status | Text | "in movimento" / "fermo" (soglia dinamica: 15m o 2× `Precisione_m` se più larga) |
+| Direzione | Double | Gradi 0-360, da `heading` Telegram, solo se il telefono si muove |
+| Precisione_m | Double | Raggio di incertezza GPS in metri (`horizontal_accuracy`) |
+| Latitudine / Longitudine | Double | Duplicate rispetto a `geometry`, comode per lettura/export in tabella |
 
 URL REST del layer (indice `/0` incluso, importante):
 ```
 https://services3.arcgis.com/MfVi0khS4tCyLmo3/arcgis/rest/services/Posizione_partenze2_PT/FeatureServer/0
 ```
+
+## Campi Feature Layer 2 (`Interventi_chiamate_PT`)
+
+Elenco completo, tipi e lunghezze in `LAYER_INTERVENTI.md`. Campi chiave:
+`Chiave` (chiave di riallineamento, `C-<n>` / `I-<n>`), `Fase` (chiamata in
+attesa / intervento in corso), `Stato_operativo` (in attesa / in uscita / sul
+posto / in rientro — non esiste negli XML, è derivato dagli orari ed è il
+campo su cui si veste la mappa). Dati personali degli XML (`RICHIEDENTE`,
+`TELE_NUMERO`, `NOME`, `COGNOME`, `COGNOME_NOME`) non vengono letti dal
+parser — esclusione alla fonte, non un filtro sulla mappa.
 
 ## Stack tecnico
 
@@ -116,6 +177,8 @@ https://services3.arcgis.com/MfVi0khS4tCyLmo3/arcgis/rest/services/Posizione_par
   (privato)
 - Nessun framework ORM: chiamate REST dirette alle API ArcGIS
 - Test locale: `ngrok` per esporre temporaneamente il webhook
+- `sync_interventi.py` gira invece sul PC del comando (Attività pianificata
+  di Windows), non su Render: solo HTTPS in uscita, nessuna porta aperta
 
 ## Link Notion
 
