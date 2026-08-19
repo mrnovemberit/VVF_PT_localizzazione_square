@@ -122,17 +122,77 @@ non richiede né credenziali né rete:
 python prova_riallineamento.py
 ```
 
-## 6. Farlo girare in continuo
+## 6. Installare sul PC del comando
+
+Sulla macchina che vede la cartella degli XML. Niente di quanto segue richiede
+privilegi di amministratore — resta però da chiedere il via libera a chi
+gestisce quella macchina.
+
+**a) Python.** Verificare se c'è già:
 
 ```
-python sync_interventi.py
+py --version
 ```
 
-Per l'esercizio, Utilità di pianificazione di Windows: attività **all'avvio del
-computer**, "Esegui indipendentemente dalla connessione dell'utente", azione
-`pythonw.exe` con argomento il percorso completo di `sync_interventi.py` e
-"Inizio" impostato sulla cartella del progetto. Lo script si riavvia da solo
-dopo un errore di rete, quindi non serve altro.
+Se manca, installarlo da python.org scegliendo **"Install for me only"** (solo
+per l'utente corrente, non serve l'amministratore) e spuntando **"Add
+python.exe to PATH"**.
+
+**b) Copiare il progetto.** Servono `sync_interventi.py`, `parser_xml.py`,
+`arcgis_client.py`, `requirements-sync.txt` e `avvia_sync.bat`. La cartella
+`esempi/` è utile per una prova preliminare ma non indispensabile.
+
+**c) Ambiente virtuale e dipendenze**, dalla cartella del progetto:
+
+```
+python -m venv .venv
+.venv\Scripts\python.exe -m pip install -r requirements-sync.txt
+```
+
+`requirements-sync.txt` contiene solo `requests` e `tzdata`: Flask e gunicorn
+riguardano il ponte Telegram e su questa macchina non servono.
+
+**d) Il file `.env`**, da creare nella cartella del progetto con quattro sole
+righe. Niente token Telegram: qui non serve, e meno segreti stanno su questa
+macchina meglio è.
+
+```
+ARCGIS_CLIENT_ID=...
+ARCGIS_CLIENT_SECRET=...
+ARCGIS_INTERVENTI_LAYER_URL=...   (con /0 finale)
+XML_CARTELLA=C:\percorso\vero\degli\xml
+```
+
+**e) Provare, in quest'ordine.** Prima a secco, che non tocca la rete:
+
+```
+.venv\Scripts\python.exe sync_interventi.py --dry-run
+```
+
+È il momento in cui si scopre se gli XML veri assomigliano davvero agli
+esempi. Poi un ciclo vero, e si guarda la webmap:
+
+```
+.venv\Scripts\python.exe sync_interventi.py --once
+```
+
+**f) Avvio automatico.** Utilità di pianificazione → Crea attività:
+
+- *Generale*: "Esegui solo se l'utente ha effettuato l'accesso" — evita di
+  dover salvare la password di Windows, e va bene se il PC resta sempre
+  connesso come tipicamente in sala operativa
+- *Attivazione*: **All'accesso**
+- *Azioni*: avvia programma → il percorso completo di **`avvia_sync.bat`**
+- *Impostazioni*: "Riavvia l'attività se non riesce" ogni 5 minuti, e
+  "Se l'attività è già in esecuzione, non avviarne una nuova"
+
+`avvia_sync.bat` lancia `pythonw.exe`, che non apre nessuna finestra. Per
+questo lo script scrive tutto in **`sync_interventi.log`**, nella cartella del
+progetto: è lì che si va a guardare se qualcosa non torna. Il file ruota da
+solo a 1 MB, non serve manutenzione.
+
+Lo script sopravvive da sé agli errori di rete e ai file scritti a metà: se
+qualcosa va storto in un ciclo, riprova al successivo senza toccare il layer.
 
 ## 7. Vestizione della webmap
 
