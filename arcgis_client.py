@@ -82,6 +82,20 @@ def query_features(layer_url: str, where: str, out_fields: str) -> list:
     return [f["attributes"] for f in data.get("features", [])]
 
 
+def descrivi_layer(layer_url: str) -> dict:
+    """Definizione del layer (campi, capacita' di modifica, tipo di geometria)."""
+    resp = requests.get(
+        layer_url.rstrip("/"),
+        params={"f": "json", "token": get_arcgis_token()},
+        timeout=TIMEOUT,
+    )
+    resp.raise_for_status()
+    data = resp.json()
+    if "error" in data:
+        raise RuntimeError(f"Errore leggendo il layer: {data['error']}")
+    return data
+
+
 def apply_edits(layer_url: str, adds=None, updates=None, deletes=None) -> dict:
     """
     Applica in un'unica chiamata inserimenti, aggiornamenti e cancellazioni.

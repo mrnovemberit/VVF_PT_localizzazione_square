@@ -84,6 +84,7 @@ Verifica che la risposta contenga `"ok": true` e che `getWebhookInfo` mostri l'U
 | `arcgis_client.py` | Token OAuth2, query e `applyEdits`, condivisi dai due flussi |
 | `parser_xml.py` | Lettura e normalizzazione degli XML Oracle, senza rete |
 | `sync_interventi.py` | Sorveglianza cartella e riallineamento del layer interventi |
+| `verifica_campi.py` | Controlla che il layer interventi abbia i 25 campi giusti |
 | `prova_riallineamento.py` | Prove su ArcGIS simulato: `python prova_riallineamento.py` |
 | `esempi/` | XML di esempio anonimizzati, usati dalle prove |
 | `LAYER_INTERVENTI.md` | Creazione del layer interventi e messa in esercizio |

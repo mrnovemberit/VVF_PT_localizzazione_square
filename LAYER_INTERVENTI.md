@@ -5,6 +5,12 @@ XML del software Oracle di gestione interventi, non dal centro nazionale.
 
 ## 1. Creare il layer su ArcGIS Online
 
+**Accedi con lo stesso account ArcGIS che possiede le credenziali OAuth già
+in uso** per il layer delle posizioni. Le credenziali "per l'autenticazione via
+app" scrivono sugli elementi privati del loro proprietario: se il layer viene
+creato da un altro account, il token dell'app non riuscirà a scriverci e
+l'errore arriverà solo al primo `applyEdits`, non prima.
+
 Contenuti → Nuovo elemento → **Feature Layer** → *Definisci il tuo layer*.
 
 - Tipo di geometria: **Punto**
@@ -12,10 +18,25 @@ Contenuti → Nuovo elemento → **Feature Layer** → *Definisci il tuo layer*.
 - Condivisione: **privato**, poi condiviso al solo gruppo del comando.
   Mai "Tutti", mai "Organizzazione" — vedi la nota sui dati in fondo.
 
-Poi, dalla scheda **Dati → Campi**, aggiungere i 25 campi qui sotto. I nomi
-devono coincidere esattamente (maiuscole comprese): sono gli stessi che
-`parser_xml.py` scrive negli attributi, e ArcGIS scarta silenziosamente gli
-attributi che non trovano un campo corrispondente.
+Poi, in **Impostazioni** dell'elemento, verificare che **la modifica sia
+abilitata** (Abilita modifica, con aggiunta/aggiornamento/eliminazione). Senza
+questo `applyEdits` risponde "Operation not allowed": è la causa più comune di
+un layer che sembra creato bene ma non riceve nulla.
+
+## 2. Aggiungere i 25 campi
+
+Dalla scheda **Dati → Campi → Aggiungi**. Tre avvertenze prima di cominciare:
+
+- Conta il **"Nome campo"** (quello tecnico), non il "Nome visualizzato": è il
+  primo che il codice usa. Il nome visualizzato può essere quello che vuoi.
+- I nomi devono coincidere **esattamente, maiuscole comprese**. ArcGIS scarta
+  in silenzio gli attributi che non trovano un campo: un `Stato_Operativo` con
+  la O maiuscola non dà errore, semplicemente resta sempre vuoto sulla mappa.
+- Per i campi data scegliere il tipo **Data** (data e ora), non "Solo data":
+  servono anche le ore e i minuti.
+
+Lasciare "Consenti valori Null" attivo su tutti: molti campi valgono solo per
+le chiamate o solo per gli interventi, e restano vuoti nell'altro caso.
 
 | Campo | Tipo | Lunghezza | Contenuto |
 |---|---|---|---|
@@ -46,9 +67,11 @@ attributi che non trovano un campo corrispondente.
 | `Longitudine` | Numero decimale | | Come sopra |
 
 Copiare infine l'URL REST del layer, **indice `/0` compreso**, e metterlo in
-`.env` alla voce `ARCGIS_INTERVENTI_LAYER_URL`.
+`.env` alla voce `ARCGIS_INTERVENTI_LAYER_URL`. L'URL si trova in fondo alla
+pagina dell'elemento, riquadro "URL": quello mostrato è il FeatureServer, il
+`/0` finale (il primo layer del servizio) va aggiunto a mano.
 
-## 2. Configurare lo script
+## 3. Configurare lo script
 
 Copiare `.env.example` in `.env` e valorizzare almeno:
 
@@ -62,7 +85,20 @@ XML_CARTELLA                                (dove Oracle scrive i due XML)
 funziona anche lanciato dall'Utilità di pianificazione, dove non c'è una shell
 che abbia già impostato le variabili.
 
-## 3. Provare prima di collegare ArcGIS
+## 4. Controllare che il layer sia a posto
+
+Prima di scriverci sopra, un controllo automatico dei 25 campi:
+
+```
+python verifica_campi.py
+```
+
+Legge la definizione del layer e segnala nomi mancanti o scritti con le
+maiuscole sbagliate, tipi errati, stringhe troppo corte e modifica non
+abilitata — cioè tutti gli errori che ArcGIS non segnalerebbe da solo. Se
+risponde "Tutto a posto", il layer è pronto.
+
+## 5. Provare prima di collegare ArcGIS
 
 ```
 python sync_interventi.py --dry-run --cartella "C:\percorso\xml"
@@ -86,7 +122,7 @@ non richiede né credenziali né rete:
 python prova_riallineamento.py
 ```
 
-## 4. Farlo girare in continuo
+## 6. Farlo girare in continuo
 
 ```
 python sync_interventi.py
@@ -98,7 +134,7 @@ computer**, "Esegui indipendentemente dalla connessione dell'utente", azione
 "Inizio" impostato sulla cartella del progetto. Lo script si riavvia da solo
 dopo un errore di rete, quindi non serve altro.
 
-## 5. Vestizione della webmap
+## 7. Vestizione della webmap
 
 - Simbologia **Valori unici** su `Stato_operativo` — è il campo pensato apposta.
 - Filtro su `Fase` per accendere o spegnere le chiamate ancora in attesa.
