@@ -1,13 +1,18 @@
-# Progetto: Tracking posizione VVF via Telegram → ArcGIS
+# Progetto: Dashboard operativa VVF Pistoia su ArcGIS
 
 ## Scopo
 
-Sistema per tracciare in tempo reale la posizione GPS di 4-5 operatori
-(telefoni cellulari) durante gli interventi, usando la funzione "Posizione
-in tempo reale" di Telegram come sorgente dati e una Feature Layer ArcGIS
-Online come destinazione, visualizzata su una webmap.
+Dashboard ArcGIS del comando provinciale, alimentata da due flussi
+indipendenti e complementari:
 
-## Architettura
+1. **Posizioni delle partenze** — posizione GPS in tempo reale di 4-5
+   operatori tramite la funzione "Posizione in tempo reale" di Telegram.
+2. **Interventi e chiamate** — stato operativo provinciale letto dagli XML
+   che il software Oracle del comando rigenera ad ogni modifica, invece che
+   dal dato redistribuito dal centro nazionale (inaffidabile: interventi
+   chiusi che restano appesi, buchi temporali, probabili crash a monte).
+
+## Architettura — flusso 1: posizioni Telegram
 
 ```
 [Operatore] --condivide posizione live--> [Bot Telegram]
@@ -33,7 +38,40 @@ Online come destinazione, visualizzata su una webmap.
   `applyEdits` di add o update di conseguenza — un solo punto per
   operatore, che si sposta, non si accumula.
 - Autenticazione ArcGIS: OAuth2 **app authentication** (client_credentials),
-  non serve login umano interattivo.
+  non serve login umano interattivo. La logica di token e `applyEdits` è
+  condivisa fra i due flussi in `arcgis_client.py`.
+
+## Architettura — flusso 2: interventi da XML Oracle
+
+```
+[Software Oracle] --rigenera ad ogni modifica--> [2 XML in una cartella]
+                                                          |
+                                          (sync_interventi.py, in polling)
+                                                          v
+                                       parsing + riallineamento del layer
+                                                          |
+                                              (OAuth2 + REST applyEdits)
+                                                          v
+                                    [Feature Layer Interventi_chiamate_PT]
+```
+
+- Ogni XML è una **fotografia completa** dello stato corrente, non un flusso
+  di eventi. Ad ogni ciclo il layer viene **riallineato** alla fotografia:
+  ciò che c'è nel file viene creato o aggiornato, ciò che non c'è più viene
+  cancellato. È questo che rende strutturalmente impossibile ritrovarsi con
+  interventi chiusi appesi sulla mappa — il difetto del dato del centro.
+- Il riallineamento è **per fase, non globale**: i due XML sono file distinti
+  e possono essere rigenerati in momenti diversi, quindi elaborando le
+  chiamate non si toccano le feature degli interventi e viceversa.
+- **Guardia anti-svuotamento**: se un XML parsa a zero elementi mentre sul
+  layer ce n'erano, serve una seconda lettura vuota consecutiva prima di
+  cancellare. Un file troncato o scritto a metà non può svuotare la mappa.
+  Un file assente non comporta mai cancellazioni.
+- File suddivisi per responsabilità: `parser_xml.py` (solo lettura e
+  normalizzazione, nessuna rete, collaudabile a secco), `sync_interventi.py`
+  (rilevazione modifiche, riallineamento, ciclo), `arcgis_client.py` (rete).
+- Vedi **`LAYER_INTERVENTI.md`** per la creazione del layer, i 25 campi da
+  creare a mano, la configurazione e la messa in esercizio.
 
 ## Stato attuale del progetto
 
@@ -57,6 +95,27 @@ Online come destinazione, visualizzata su una webmap.
 - [ ] Campo `Moving_status` (fermo/in movimento) aggiunto in `app.py`
       (18/08/2026) — manca ancora: creare il campo Text sul Feature Layer
       su ArcGIS Online e impostare il renderer "Valori unici" sulla webmap
+
+### Flusso 2 — interventi da XML Oracle (avviato 19/08/2026)
+
+- [x] Struttura dei due XML analizzata sugli esempi reali
+- [x] `parser_xml.py`, `sync_interventi.py`, `arcgis_client.py` scritti
+- [x] `app.py` rifattorizzato per usare `arcgis_client.py` condiviso
+- [x] Collaudo a secco superato: parsing, accenti iso-8859-1, passaggio di
+      mezzanotte, aggregazione dei mezzi, riallineamento, guardie
+      (`prova_riallineamento.py`, 7 prove su ArcGIS simulato)
+- [ ] Individuare la cartella reale in cui il software Oracle scrive gli XML
+- [ ] Chiedere il via libera al referente informatico per far girare lo
+      script sulla macchina del comando (tecnicamente non servono privilegi
+      di amministratore, ma l'autorizzazione va chiesta comunque)
+- [ ] Creare il Feature Layer `Interventi_chiamate_PT` su ArcGIS Online
+      (25 campi, vedi `LAYER_INTERVENTI.md`) — **privato**
+- [ ] Prima scrittura reale e test di riallineamento sul campo
+- [ ] Vestizione webmap a valori unici su `Stato_operativo`
+- [ ] Ottenere la tabella di decodifica di `COD_TIPOLOGIA` (le chiamate in
+      attesa mostrano per ora "Codice NN")
+- [ ] Verificare il vocabolario di `STATUS` (`A` = aperto è un'ipotesi) e
+      valorizzare `STATI_CHIUSI` se emergono altri codici
 
 ### Completato
 
@@ -83,11 +142,26 @@ Online come destinazione, visualizzata su una webmap.
 - **Nomi campo sul layer**: attenzione, `Data_ora` non `Timestamp`
   (il nome "Timestamp" è riservato/sconsigliato in ArcGIS). Vedi sezione
   "Campi Feature Layer" sotto per l'elenco completo e aggiornato.
+- **XML locali invece del dato del centro nazionale**: il software Oracle del
+  comando è la fonte autoritativa per la provincia e scrive uno snapshot
+  completo ad ogni modifica. Usarlo elimina in un colpo solo i tre difetti del
+  dato ridistribuito (interventi appesi, buchi temporali, crash a monte) e
+  toglie una dipendenza da un sistema su cui non abbiamo nessun controllo.
+- **Riallineamento invece di inseguire gli eventi**: poiché ogni XML è una
+  fotografia completa, non serve ricostruire cosa è cambiato — si porta il
+  layer a coincidere col file. Anche saltando dei cicli, il layer non può
+  divergere dalla realtà. Stessa filosofia del "niente storage esterno" già
+  adottata per le posizioni.
+- **Dati personali esclusi in fase di parsing, non filtrati sulla mappa**: un
+  dato mai caricato non può essere esposto da un errore di condivisione.
+- **Un solo layer per chiamate e interventi**, distinti dal campo `Fase`:
+  la vestizione a valori unici e i filtri della webmap fanno il resto, come
+  già si fa con `Moving_status`.
 - **Repository GitHub privato**: `CLAUDE.md` contiene l'URL reale del
   Feature Layer ArcGIS, quindi il repo è privato invece che pubblico
   (riguarda posizioni in tempo reale di operatori durante interventi).
 
-## Campi Feature Layer (`Posizione_partenze_PT`)
+## Campi Feature Layer 1 (`Posizione_partenze_PT`)
 
 | Campo | Tipo | Note |
 |---|---|---|
@@ -107,6 +181,19 @@ URL REST del layer (indice `/0` incluso, importante):
 https://services3.arcgis.com/MfVi0khS4tCyLmo3/arcgis/rest/services/Posizione_partenze2_PT/FeatureServer/0
 ```
 
+## Campi Feature Layer 2 (`Interventi_chiamate_PT`)
+
+Elenco completo, tipi e lunghezze in `LAYER_INTERVENTI.md`. I campi chiave da
+tenere a mente: `Chiave` (chiave di riallineamento, `C-<n>` / `I-<n>`), `Fase`
+(chiamata in attesa / intervento in corso) e `Stato_operativo` (in attesa / in
+uscita / sul posto / in rientro), che è il campo su cui si veste la mappa e che
+**negli XML non esiste**: viene derivato dagli orari valorizzati.
+
+Dati personali degli XML (`RICHIEDENTE`, `TELE_NUMERO`, `NOME`, `COGNOME`,
+`COGNOME_NOME`) **non vengono letti** da `parser_xml.py`: l'esclusione è alla
+fonte, non un filtro sulla mappa. Restano indirizzo e note libere, operativamente
+necessari — per questo il layer va tenuto privato.
+
 ## Stack tecnico
 
 - Python 3, Flask, libreria `requests`
@@ -116,6 +203,9 @@ https://services3.arcgis.com/MfVi0khS4tCyLmo3/arcgis/rest/services/Posizione_par
   (privato)
 - Nessun framework ORM: chiamate REST dirette alle API ArcGIS
 - Test locale: `ngrok` per esporre temporaneamente il webhook
+- `sync_interventi.py` gira invece sulla macchina del comando che vede la
+  cartella degli XML (Utilità di pianificazione di Windows), non su Render:
+  serve solo traffico HTTPS in uscita, nessuna porta aperta
 
 ## Link Notion
 
