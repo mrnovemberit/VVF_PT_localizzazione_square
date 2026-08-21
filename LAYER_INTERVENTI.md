@@ -40,7 +40,7 @@ le chiamate o solo per gli interventi, e restano vuoti nell'altro caso.
 
 | Campo | Tipo | Lunghezza | Contenuto |
 |---|---|---|---|
-| `Chiave` | Stringa | 50 | `C-<numero>` o `I-<numero>`. È la chiave di riallineamento: senza questo campo il sistema non funziona |
+| `Chiave` | Stringa | 50 | `C-<numero>-<GGMMAAAA>` o `I-<numero>-<GGMMAAAA>`. È la chiave di riallineamento: senza questo campo il sistema non funziona. La data è necessaria perché il numero di chiamata/intervento riparte da 1 ogni notte |
 | `Fase` | Stringa | 30 | `chiamata in attesa` / `intervento in corso` |
 | `Numero` | Stringa | 30 | Numero chiamata o intervento, es. `3109 /1` |
 | `Tipologia` | Stringa | 120 | Testo per gli interventi, `Codice NN` per le chiamate |

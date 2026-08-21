@@ -136,6 +136,25 @@ def _orari(elemento):
     return risultato
 
 
+def _suffisso_data(elemento):
+    """
+    'GGMMAAAA' dalla DATA_CHIAMATA, da usare nella Chiave.
+
+    Il numero di chiamata dell'Oracle riparte da 1 ogni notte: senza la data,
+    una C-27 di oggi e una C-27 di ieri (ancora nel file perché rimasta
+    aperta) si scontrerebbero sulla stessa Chiave. Restituisce None se la
+    data non è leggibile — il chiamante deve gestire il caso.
+    """
+    testo = _testo(elemento, "DATA_CHIAMATA")
+    if not testo:
+        return None
+    try:
+        giorno = datetime.strptime(testo, "%d/%m/%Y")
+    except ValueError:
+        return None
+    return giorno.strftime("%d%m%Y")
+
+
 def _geometria(elemento):
     """Punto WGS84 dalle coordinate del record. COORD_X è la longitudine."""
     lon = _numero(elemento, "COORD_X")
@@ -194,13 +213,22 @@ def leggi_chiamate(percorso, adesso_ms=None):
             log.warning("Chiamata %s senza coordinate, saltata", numero)
             continue
 
+        suffisso_data = _suffisso_data(chiamata)
+        if suffisso_data is None:
+            log.warning(
+                "Chiamata %s senza DATA_CHIAMATA leggibile: la Chiave non "
+                "include la data, rischio di collisione con altri giorni",
+                numero,
+            )
+        chiave = "C-{}-{}".format(numero, suffisso_data) if suffisso_data else "C-{}".format(numero)
+
         orari = _orari(chiamata)
         # Nelle chiamate la tipologia è un codice numerico: finché non abbiamo
         # la tabella di decodifica del software Oracle lo mostriamo come tale.
         codice = _testo(chiamata, "COD_TIPOLOGIA")
 
         attributi = {
-            "Chiave": "C-{}".format(numero),
+            "Chiave": chiave,
             "Fase": FASE_CHIAMATA,
             "Numero": numero,
             "Tipologia": "Codice {}".format(codice) if codice else None,
@@ -274,8 +302,17 @@ def leggi_interventi(percorso, adesso_ms=None, stati_chiusi=()):
             log.warning("Intervento %s senza coordinate, saltato", numero)
             continue
 
+        suffisso_data = _suffisso_data(riga)
+        if suffisso_data is None:
+            log.warning(
+                "Intervento %s senza DATA_CHIAMATA leggibile: la Chiave non "
+                "include la data, rischio di collisione con altri giorni",
+                numero,
+            )
+        chiave = "I-{}-{}".format(numero, suffisso_data) if suffisso_data else "I-{}".format(numero)
+
         attributi = {
-            "Chiave": "I-{}".format(numero),
+            "Chiave": chiave,
             "Fase": FASE_INTERVENTO,
             "Numero": numero,
             "Tipologia": _testo(riga, "TIPOLOGIA"),

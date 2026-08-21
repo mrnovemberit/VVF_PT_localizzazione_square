@@ -47,6 +47,10 @@ shutil.copy(os.path.join(ESEMPI, "interventi.XML"), INTERVENTI)
 def chiavi():
     return sorted(a["Chiave"] for a in LAYER.values())
 
+# Le chiavi ora includono la data (DATA_CHIAMATA negli esempi è 19/08/2026),
+# per non scontrarsi con chiamate/interventi omonimi di un altro giorno.
+DATA = "19082026"
+
 def controlla(descrizione, atteso):
     ottenuto = chiavi()
     esito = "OK " if ottenuto == sorted(atteso) else "FALLITO"
@@ -58,7 +62,7 @@ def controlla(descrizione, atteso):
 print("\n--- 1. Primo caricamento ---")
 sync.elabora(CARTELLA, "http://finto", forza=True)
 controlla("tutto quello che c'è negli XML finisce sul layer",
-          ["C-14", "I-3109 /1", "I-3109 /2"])
+          [f"C-14-{DATA}", f"I-3109 /1-{DATA}", f"I-3109 /2-{DATA}"])
 
 print("\n--- 2. Un intervento si chiude e sparisce dall'XML ---")
 testo = open(INTERVENTI, encoding="iso-8859-1").read()
@@ -67,7 +71,7 @@ fine = testo.rindex("</intervento>") + len("</intervento>")
 open(INTERVENTI, "w", encoding="iso-8859-1").write(testo[:inizio] + testo[fine:])
 sync.elabora(CARTELLA, "http://finto")
 controlla("l'intervento sparito dall'XML viene rimosso dal layer",
-          ["C-14", "I-3109 /1"])
+          [f"C-14-{DATA}", f"I-3109 /1-{DATA}"])
 
 print("\n--- 3. Intervento chiuso con ORA_RIENTRO valorizzata ---")
 testo = open(INTERVENTI, encoding="iso-8859-1").read()
@@ -75,21 +79,21 @@ testo = testo.replace('<ORA_RIENTRO NULL="TRUE"/>', "<ORA_RIENTRO>19:40</ORA_RIE
 open(INTERVENTI, "w", encoding="iso-8859-1").write(testo)
 sync.elabora(CARTELLA, "http://finto")
 controlla("era l'ultimo aperto: la guardia chiede conferma prima di svuotare",
-          ["C-14", "I-3109 /1"])
+          [f"C-14-{DATA}", f"I-3109 /1-{DATA}"])
 sync.elabora(CARTELLA, "http://finto", forza=True)
-controlla("al ciclo successivo l'intervento rientrato sparisce", ["C-14"])
+controlla("al ciclo successivo l'intervento rientrato sparisce", [f"C-14-{DATA}"])
 
 print("\n--- 4. XML troncato mentre Oracle lo riscrive ---")
 testo = open(CHIAMATE, encoding="iso-8859-1").read()
 open(CHIAMATE, "w", encoding="iso-8859-1").write(testo[: len(testo) // 2])
 sync.elabora(CARTELLA, "http://finto")
-controlla("un file troncato non tocca il layer", ["C-14"])
+controlla("un file troncato non tocca il layer", [f"C-14-{DATA}"])
 
 print("\n--- 5. XML valido ma vuoto: prima lettura ---")
 open(CHIAMATE, "w", encoding="iso-8859-1").write(
     "<?xml version = '1.0' encoding = 'iso-8859-1'?>\n<ROWSET>\n</ROWSET>")
 sync.elabora(CARTELLA, "http://finto", forza=True)
-controlla("la guardia impedisce lo svuotamento al primo colpo", ["C-14"])
+controlla("la guardia impedisce lo svuotamento al primo colpo", [f"C-14-{DATA}"])
 
 print("\n--- 6. XML ancora vuoto: seconda lettura consecutiva ---")
 sync.elabora(CARTELLA, "http://finto", forza=True)
