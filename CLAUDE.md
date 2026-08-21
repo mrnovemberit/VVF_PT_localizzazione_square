@@ -76,32 +76,35 @@ indipendenti e complementari:
 - [ ] Campo `Moving_status` (18/08/2026): creare il campo sul layer e il
       renderer "Valori unici" sulla webmap
 
-### Flusso 2 — interventi da XML Oracle (avviato 19/08/2026)
+### Flusso 2 — interventi da XML Oracle (in produzione dal 21/08/2026)
 
-- [x] Struttura XML analizzata; `parser_xml.py`, `sync_interventi.py`,
-      `arcgis_client.py`, `verifica_campi.py` scritti; `app.py`
-      rifattorizzato per usare `arcgis_client.py` condiviso
-- [x] Collaudo a secco: 8 prove su ArcGIS simulato, tutte superate
-      (`prova_riallineamento.py`)
-- [x] Layer `Interventi_chiamate_PT` creato (25 campi, privato); prima
-      scrittura reale riuscita, 3 feature visibili sulla webmap
-- [x] Cartella XML sul PC del comando individuata; installazione preparata
-      (`avvia_sync.bat`, `requirements-sync.txt`, log su file con rotazione)
-- [ ] Autorizzazione del referente informatico per la macchina del comando
-      — **rimandata a domani**
-- [ ] Installare e collaudare sul PC del comando (`--dry-run` sui file veri
-      per primo, poi `--once`, poi l'Attività pianificata)
+- [x] `parser_xml.py`, `sync_interventi.py`, `arcgis_client.py`,
+      `verifica_campi.py` scritti; `app.py` rifattorizzato per usare
+      `arcgis_client.py` condiviso; layer creato (25 campi, privato)
+- [x] Installato sul PC di sala operativa (`C:\VVF_sync_interventi`),
+      Attività pianificata configurata e verificata attiva
+- [x] Prima scrittura reale: 30 chiamate + 7 interventi sul layer,
+      confermati sulla webmap
+- [ ] Riavviare il PC di sala operativa per confermare che l'Attività
+      pianificata riparte da sola senza intervento manuale
 - [ ] Vestizione webmap a valori unici su `Stato_operativo`
 - [ ] Tabella di decodifica di `COD_TIPOLOGIA` (le chiamate mostrano per
       ora "Codice NN")
-- [ ] Vocabolario di `STATUS` (`A` = aperto è un'ipotesi); valorizzare
-      `STATI_CHIUSI` se emergono altri codici
+- [ ] Vocabolario di `STATUS` (`A`/`P`/`S` visti finora; `Stato_operativo`
+      non dipende da `STATUS` quindi non è bloccante)
+- [ ] Log duplicato per interventi senza coordinate (cosmetico)
+- [ ] Geocodifica delle chiamate senza coordinate (14/30 nella prima
+      estrazione reale restano fuori mappa per design, non è un bug)
 
 ### Completato
 
-- **Flusso 2 (interventi da XML Oracle) funzionante end-to-end in locale**
-  il 19/08/2026: parser, sincronizzatore, layer creato, primo test di
-  scrittura riuscito sugli esempi. Dettagli nel diario.
+- **Flusso 2 in produzione sul PC di sala operativa** il 21/08/2026: due bug
+  reali scoperti sui dati veri e risolti (Chiave non univoca — il numero
+  chiamata riparte ogni notte — e orari con suffisso `-s` che si perdevano
+  nel parsing), scrittura e Attività pianificata verificate attive.
+  Dettagli nel diario.
+- **Flusso 2 funzionante end-to-end in locale** il 19/08/2026: parser,
+  sincronizzatore, layer creato, primo test di scrittura sugli esempi.
 - **Deploy su Render e verifica end-to-end in produzione** il 08/08/2026:
   repo GitHub privato creato, deploy Render riuscito, webhook definitivo
   registrato, scrittura/aggiornamento/movimento confermati sia da query
@@ -161,11 +164,13 @@ https://services3.arcgis.com/MfVi0khS4tCyLmo3/arcgis/rest/services/Posizione_par
 ## Campi Feature Layer 2 (`Interventi_chiamate_PT`)
 
 Elenco completo, tipi e lunghezze in `LAYER_INTERVENTI.md`. Campi chiave:
-`Chiave` (chiave di riallineamento, `C-<n>` / `I-<n>`), `Fase` (chiamata in
-attesa / intervento in corso), `Stato_operativo` (in attesa / in uscita / sul
-posto / in rientro — non esiste negli XML, è derivato dagli orari ed è il
-campo su cui si veste la mappa). Dati personali degli XML (`RICHIEDENTE`,
-`TELE_NUMERO`, `NOME`, `COGNOME`, `COGNOME_NOME`) non vengono letti dal
+`Chiave` (chiave di riallineamento, `C-<n>-<GGMMAAAA>` / `I-<n>-<GGMMAAAA>` —
+la data è necessaria perché il numero di chiamata riparte da 1 ogni notte,
+vedi diario 21/08/2026), `Fase` (chiamata in attesa / intervento in corso),
+`Stato_operativo` (in attesa / in uscita / sul posto / in rientro — non
+esiste negli XML, è derivato dagli orari ed è il campo su cui si veste la
+mappa). Dati personali degli XML (`RICHIEDENTE`, `TELE_NUMERO`, `NOME`,
+`COGNOME`, `COGNOME_NOME`) non vengono letti dal
 parser — esclusione alla fonte, non un filtro sulla mappa.
 
 ## Stack tecnico

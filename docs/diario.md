@@ -1,5 +1,80 @@
 # Diario di sessione
 
+## 21/08/2026 — Installazione in produzione sul PC del comando, due bug reali scoperti e risolti
+
+- **Autorizzazioni ottenute**: ok del comandante e del referente informatico. Discusso e
+  scartato con l'utente il suggerimento dell'informatico di un server con Docker — non
+  necessario per un loop di polling leggero (una chiamata HTTP ogni 20s), e avrebbe reso
+  di rete l'accesso alla cartella XML invece che locale. Confermato l'uso del PC di sala
+  operativa, sempre acceso e con accesso diretto alla cartella.
+- **Trasferimento file**: chiavetta USB. Preparata `VVF_sync_interventi_per_chiavetta/`
+  (Desktop) con i 6 file minimi (`sync_interventi.py`, `parser_xml.py`,
+  `arcgis_client.py`, `verifica_campi.py`, `requirements-sync.txt`, `avvia_sync.bat`) —
+  aggiornata ad ogni fix fatto durante l'installazione, così l'utente ha sempre ricopiato
+  solo il singolo file cambiato.
+- **Installazione sul PC di sala operativa** (`C:\VVF_sync_interventi`): Python 3.11.9 già
+  presente (launcher `py` assente ma `python` funzionante, nessun problema — gli script
+  usano sempre il percorso diretto, mai `py`), venv creato, `requirements-sync.txt`
+  installato, `.env` con le 4 variabili copiate a mano dal `.env` del PC principale
+  (deliberatamente non incollate in chat). Cartella XML reale:
+  `C:\users\pianificazione\Temp\ONLINE`.
+- **Bug scoperto durante l'installazione**: `verifica_campi.py` andava in
+  `FileNotFoundError` senza la cartella `esempi/`, che invece la guida descriveva come
+  "non indispensabile" — non era mai stata inclusa nel pacchetto minimo. Sistemato
+  rendendo quel controllo opzionale con un avviso invece di un crash (commit `4de9668`).
+- **`verifica_campi.py` → "Tutto a posto"**, poi primo `--dry-run` sui file XML **veri**
+  del gestionale (non più solo gli esempi): qui sono emersi due bug reali, entrambi
+  scoperti solo grazie ai dati di produzione, non riproducibili dai due esempi statici.
+  - **Bug 1 (serio) — `CHIAMATA` non è un identificatore univoco.** Nei dati reali
+    `C-27` compariva due volte con indirizzi completamente diversi (Via Vacchereccia a
+    Massa e Cozzile del 20/08 21:11, e Via Gabbellini a Serravalle Pistoiese del 21/08
+    01:51). L'utente ha spiegato la causa: il contatore del software Oracle riparte da 1
+    ogni mezzanotte, e il file può contenere ancora chiamate del giorno prima rimaste
+    aperte. Rischio concreto: due chiamate reali che si sovrascrivono a vicenda sul
+    layer, o che il riallineamento ne cancelli una scambiandola per un doppione. Risolto
+    aggiungendo la data alla `Chiave` (`C-<numero>-<GGMMAAAA>` /
+    `I-<numero>-<GGMMAAAA>`, presa da `DATA_CHIAMATA`, stabile per tutta la vita del
+    record anche se prosegue oltre mezzanotte) — commit `ab6be35`.
+    `prova_riallineamento.py` aggiornato alle nuove chiavi, tutte e 8 le prove
+    riconfermate. Verificato anche con un caso sintetico riproducente esattamente lo
+    scenario delle due `C-27`.
+  - **Bug 2 — suffisso su `ORA_USCITA`.** Il software scrive a volte `'05:49 -s'` invece
+    di `'05:49'`. Il parsing con `split(":")` andava in `ValueError` sull'intero valore,
+    e l'orario spariva silenziosamente dagli attributi — con effetto a cascata su
+    `Stato_operativo` (calcolato dagli orari valorizzati: un intervento già uscito
+    poteva risultare ancora "in attesa"). Confermato l'impatto reale: `I-3173 /1` prima
+    del fix sarebbe risultato "in attesa" invece di "in uscita". Risolto con una regex
+    che legge solo l'HH:MM iniziale e logga il suffisso a livello INFO per curiosità
+    (non è chiaro cosa significhi "-s", ma non blocca più) — commit `73eb832`.
+  - Non è chiaro il significato di `STATUS` = "P"/"S" oltre "A", ma non è bloccante:
+    `Stato_operativo` non dipende da `STATUS`, solo dagli orari. Lasciato come
+    osservazione loggata, non richiede azione.
+  - Rimandati a un secondo momento, non bloccanti: log duplicato per interventi senza
+    coordinate (cosmetico, non funzionale), decodifica di `COD_TIPOLOGIA`, geocodifica
+    delle chiamate senza coordinate (14 su 30 nella prima estrazione reale — restano
+    fuori mappa per design, non è un bug).
+  - **Nota privacy confermata sul campo**: una chiamata reale aveva nel campo
+    `NOTE_INTERVENTO` il nome di un residente ("Baldacci Alessandro è il residente...").
+    Non più un'ipotesi teorica della guida — l'utente ha scelto di mantenere il layer
+    privato con condivisione ristretta invece di togliere il campo `Note`.
+- **Prima scrittura reale sul Feature Layer** `Interventi_chiamate_PT`: 30 chiamate + 7
+  interventi (`python sync_interventi.py --once`), confermate visibili sulla webmap
+  dall'utente. Le 3 feature di prova della sessione precedente (`C-14`, `I-3109 /1`,
+  `I-3109 /2`) correttamente rimosse dal riallineamento.
+- **Attività pianificata di Windows configurata**: "Sync Interventi VVF", trigger
+  "All'accesso", azione `avvia_sync.bat`, riavvio automatico ogni 5 minuti in caso di
+  fallimento. Verificata in tre modi indipendenti dopo l'avvio manuale di prova:
+  processo `pythonw.exe` vivo, riga "Sorveglio ... ogni 20 secondi" presente nel log,
+  e un ciclo reale a 13 minuti di distanza con `0 nuovi, 7 aggiornati, 0 rimossi` — prova
+  che il polling stava davvero girando e non si era fermato dopo il primo giro. Spiegato
+  all'utente perché `LastTaskResult: 0` e il processo ancora vivo non sono in
+  contraddizione: `avvia_sync.bat` usa `start`, che stacca il processo Python dall'attività
+  che l'ha lanciata.
+- **Non ancora fatto**: riavvio del PC per confermare che l'attività riparte da sola senza
+  intervento manuale (consigliato ma non urgente, l'utente può farlo con calma).
+- **Aiuto fornito su PowerShell durante la sessione**: sbloccato un prompt `>>` dovuto a
+  virgolette tipografiche incollate al posto di quelle dritte.
+
 ## 19/08/2026 — Feature Layer interventi da XML Oracle: parser, sync, primo test riuscito
 
 - **Obiettivo della sessione**: un secondo Feature Layer ArcGIS per la
