@@ -12,6 +12,7 @@ vengono mai letti: non entrano nemmeno in memoria, così non possono finire
 sul layer per errore.
 """
 
+import re
 import logging
 import xml.etree.ElementTree as ET
 from datetime import datetime, timedelta, timezone
@@ -111,11 +112,19 @@ def _orari(elemento):
         ora_testo = _testo(elemento, tag)
         if not ora_testo:
             continue
-        try:
-            ora, minuti = (int(p) for p in ora_testo.split(":")[:2])
-        except ValueError:
+        # Il software Oracle a volte appende un suffisso all'orario, es.
+        # "05:49 -s": si legge comunque l'ora, il resto si logga per
+        # curiosità ma non blocca il parsing (prima andava perso l'intero
+        # orario, con effetti a cascata su Stato_operativo).
+        corrispondenza = re.match(r"^(\d{1,2}):(\d{2})", ora_testo)
+        if not corrispondenza:
             log.warning("Orario non interpretabile in <%s>: %r", tag, ora_testo)
             continue
+        ora, minuti = int(corrispondenza.group(1)), int(corrispondenza.group(2))
+        suffisso = ora_testo[corrispondenza.end():].strip()
+        if suffisso:
+            log.info("Orario in <%s> con suffisso ignorato: %r (letto %02d:%02d)",
+                      tag, suffisso, ora, minuti)
 
         momento = giorno + timedelta(hours=ora, minutes=minuti)
         if precedente is not None and momento < precedente:
