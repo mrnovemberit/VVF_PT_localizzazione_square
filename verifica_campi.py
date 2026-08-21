@@ -124,7 +124,14 @@ def main():
                 )
             )
 
-    mancanti_nel_controllo = campi_prodotti_dal_codice() - set(CAMPI_ATTESI)
+    try:
+        mancanti_nel_controllo = campi_prodotti_dal_codice() - set(CAMPI_ATTESI)
+    except FileNotFoundError:
+        # La cartella esempi/ è comoda per collaudare in locale ma non
+        # indispensabile: sul PC del comando può mancare, senza che questo
+        # impedisca il controllo dei campi (che è la parte che conta qui).
+        print("(cartella esempi/ non trovata, salto il confronto con il parser)\n")
+        mancanti_nel_controllo = set()
     if mancanti_nel_controllo:
         problemi.append(
             "Il parser produce campi non previsti da questo controllo: {}. "
