@@ -29,6 +29,8 @@ from functools import partial
 from parser_xml import (
     leggi_chiamate,
     leggi_interventi,
+    note_da_chiamate,
+    poligoni_da_query,
     FASE_CHIAMATA,
     FASE_INTERVENTO,
 )
@@ -45,15 +47,18 @@ CARTELLA_SCRIPT = os.path.dirname(os.path.abspath(__file__))
 # ---------------------------------------------------------------------------
 # Configurazione
 # ---------------------------------------------------------------------------
-def carica_env_locale():
+def carica_env_locale(nome_file=".env"):
     """
-    Carica le variabili dal file .env accanto allo script, se presente.
+    Carica le variabili dal file indicato (di norma .env) accanto allo
+    script, se presente.
 
     Serve per l'esecuzione come Attività pianificata di Windows, dove non c'è
     una shell che abbia già impostato l'ambiente. Le variabili già presenti
-    nell'ambiente hanno comunque la precedenza.
+    nell'ambiente hanno comunque la precedenza. Il nome del file è
+    parametrizzabile per poter tenere più configurazioni affiancate (es.
+    ".env.test" per un layer sperimentale) senza doverle rinominare a turno.
     """
-    percorso = os.path.join(CARTELLA_SCRIPT, ".env")
+    percorso = os.path.join(CARTELLA_SCRIPT, nome_file)
     if not os.path.exists(percorso):
         return
     with open(percorso, encoding="utf-8") as f:
@@ -75,9 +80,16 @@ STATI_CHIUSI = tuple(
     s.strip() for s in os.environ.get("STATI_CHIUSI", "").split(",") if s.strip()
 )
 
-# Memoria fra un ciclo e l'altro: hash dei file già elaborati e conteggio delle
-# letture vuote consecutive (vedi la guardia anti-svuotamento in riallinea).
-_stato = {"hash": {}, "vuoti_consecutivi": {}}
+# Memoria fra un ciclo e l'altro: hash dei file già elaborati, conteggio delle
+# letture vuote consecutive (vedi la guardia anti-svuotamento in riallinea), le
+# note delle chiamate ancora in coda (vedi aggiorna_note_cache) e i poligoni
+# delle zone di competenza (vedi carica_poligoni_zona). "poligoni_zona": None
+# significa "non ancora caricati", [] significa "disattivato/URL non impostato".
+_stato = {"hash": {}, "vuoti_consecutivi": {}, "note_cache": {}, "poligoni_zona": None}
+
+# Da quanto tempo una nota può restare in cache senza che la chiamata
+# corrispondente sia mai diventata un intervento, prima di essere scartata.
+NOTE_CACHE_MAX_ORE = 48
 
 
 # ---------------------------------------------------------------------------
@@ -111,6 +123,60 @@ def leggi_con_retry(lettore, percorso):
             return None
     log.error("Parsing di %s fallito due volte, ciclo saltato", percorso)
     return None
+
+
+def aggiorna_note_cache(percorso_chiamate):
+    """
+    Ricorda le note (e i tag) delle chiamate ancora in coda.
+
+    L'XML degli interventi non riporta più la nota una volta che la chiamata
+    viene assegnata: senza questa cache, un tag come #autoscala scritto in
+    sala mentre la chiamata aspetta sparirebbe non appena esce una squadra.
+    Tollera un file troncato allo stesso modo di leggi_con_retry: la lettura
+    delle chiamate vere e proprie, poco prima nello stesso ciclo, ha già
+    accertato che il file esiste ed è (stato) leggibile.
+    """
+    try:
+        fresche = note_da_chiamate(percorso_chiamate)
+    except ET.ParseError:
+        return
+
+    adesso = int(time.time() * 1000)
+    for chiave, dati in fresche.items():
+        _stato["note_cache"][chiave] = dict(dati, vista_ms=adesso)
+
+    soglia = adesso - NOTE_CACHE_MAX_ORE * 3600 * 1000
+    scadute = [c for c, d in _stato["note_cache"].items() if d["vista_ms"] < soglia]
+    for chiave in scadute:
+        del _stato["note_cache"][chiave]
+
+
+def carica_poligoni_zona():
+    """
+    Carica una sola volta i poligoni delle zone di competenza da
+    ARCGIS_ZONA_LAYER_URL: i confini non cambiano da un ciclo all'altro, non
+    ha senso reinterrogare ArcGIS ogni volta.
+
+    Se la variabile non è impostata la funzionalità è semplicemente
+    disattivata (Zona_competenza resta vuoto ovunque). Se la query fallisce
+    (rete, permessi) _stato["poligoni_zona"] resta None e si riprova al
+    ciclo successivo, senza far fallire il resto del ciclo corrente.
+    """
+    if _stato["poligoni_zona"] is not None:
+        return
+
+    layer_url = os.environ.get("ARCGIS_ZONA_LAYER_URL", "").rstrip("/")
+    if not layer_url:
+        _stato["poligoni_zona"] = []
+        return
+
+    try:
+        from arcgis_client import query_poligoni
+        grezzi = query_poligoni(layer_url, "ZONA_COMPETENZA")
+        _stato["poligoni_zona"] = poligoni_da_query(grezzi)
+        log.info("Zone di competenza caricate: %s poligoni", len(_stato["poligoni_zona"]))
+    except Exception:
+        log.exception("Impossibile caricare le zone di competenza, riprovo al prossimo ciclo")
 
 
 # ---------------------------------------------------------------------------
@@ -205,13 +271,19 @@ def elabora(cartella, layer_url, forza=False, dry_run=False):
     Un file assente non comporta mai cancellazioni: se il software Oracle non
     lo ha (ancora) scritto, la fase corrispondente resta com'è sul layer.
     """
+    if not dry_run:
+        # Il --dry-run non deve toccare la rete per nessun motivo (si usa
+        # anche prima di aver configurato le credenziali): niente zone lì.
+        carica_poligoni_zona()
+
+    percorso_chiamate = os.path.join(cartella, NOME_FILE_CHIAMATE)
     lavori = [
-        (FASE_CHIAMATA,
-         os.path.join(cartella, NOME_FILE_CHIAMATE),
-         leggi_chiamate),
+        (FASE_CHIAMATA, percorso_chiamate,
+         partial(leggi_chiamate, poligoni=_stato["poligoni_zona"])),
         (FASE_INTERVENTO,
          os.path.join(cartella, NOME_FILE_INTERVENTI),
-         partial(leggi_interventi, stati_chiusi=STATI_CHIUSI)),
+         partial(leggi_interventi, stati_chiusi=STATI_CHIUSI,
+                 note_cache=_stato["note_cache"], poligoni=_stato["poligoni_zona"])),
     ]
 
     for fase, percorso, lettore in lavori:
@@ -226,6 +298,11 @@ def elabora(cartella, layer_url, forza=False, dry_run=False):
         feature = leggi_con_retry(lettore, percorso)
         if feature is None:
             continue  # parsing fallito: il layer resta com'è
+
+        if fase == FASE_CHIAMATA:
+            # Prima di elaborare gli interventi, che leggono da questa stessa
+            # cache: le chiamate vanno aggiornate per prime nell'elenco sopra.
+            aggiorna_note_cache(percorso)
 
         log.info("%s: lette %s feature da %s", fase, len(feature), os.path.basename(percorso))
 
@@ -259,17 +336,23 @@ def configura_log_su_file():
 
 
 def main():
-    carica_env_locale()
-
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--cartella", help="Cartella dei due XML (default: XML_CARTELLA)")
     parser.add_argument("--once", action="store_true", help="Esegue un solo ciclo e termina")
     parser.add_argument("--dry-run", action="store_true",
                         help="Legge gli XML e stampa cosa scriverebbe, senza toccare ArcGIS")
-    parser.add_argument("--intervallo", type=int,
-                        default=int(os.environ.get("INTERVALLO_SECONDI", "20")),
-                        help="Secondi fra un controllo e l'altro (default 20)")
+    parser.add_argument("--intervallo", type=int, default=None,
+                        help="Secondi fra un controllo e l'altro (default 20, o "
+                             "INTERVALLO_SECONDI dal file di configurazione)")
+    parser.add_argument("--env-file", default=".env",
+                        help="File di configurazione da caricare, accanto allo script "
+                             "(default: .env; utile per puntare a un layer di prova, "
+                             "es. --env-file .env.charlie)")
     args = parser.parse_args()
+
+    carica_env_locale(args.env_file)
+    if args.intervallo is None:
+        args.intervallo = int(os.environ.get("INTERVALLO_SECONDI", "20"))
 
     cartella = args.cartella or os.environ.get("XML_CARTELLA")
     if not cartella:

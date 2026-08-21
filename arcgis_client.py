@@ -82,6 +82,34 @@ def query_features(layer_url: str, where: str, out_fields: str) -> list:
     return [f["attributes"] for f in data.get("features", [])]
 
 
+def query_poligoni(layer_url: str, out_fields: str) -> dict:
+    """
+    Come query_features, ma con la geometria: serve per i layer poligonali
+    (es. le zone di competenza), che query_features scarta apposta perché i
+    punti di chiamate/interventi non ne hanno bisogno.
+
+    Restituisce l'intera risposta (non solo "features"): poligoni_da_query()
+    ha bisogno anche di "spatialReference" per sapere in che proiezione sono
+    le coordinate.
+    """
+    resp = requests.get(
+        f"{layer_url.rstrip('/')}/query",
+        params={
+            "where": "1=1",
+            "outFields": out_fields,
+            "returnGeometry": "true",
+            "f": "json",
+            "token": get_arcgis_token(),
+        },
+        timeout=TIMEOUT,
+    )
+    resp.raise_for_status()
+    data = resp.json()
+    if "error" in data:
+        raise RuntimeError(f"Errore query ArcGIS: {data['error']}")
+    return data
+
+
 def descrivi_layer(layer_url: str) -> dict:
     """Definizione del layer (campi, capacita' di modifica, tipo di geometria)."""
     resp = requests.get(

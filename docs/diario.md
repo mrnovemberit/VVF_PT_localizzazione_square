@@ -1,5 +1,138 @@
 # Diario di sessione
 
+## 21/08/2026 — Ridisegno stato interventi (sospeso), Tag e Zone di competenza
+
+Sessione lunga partita dall'analisi dei due XML reali di una notte di allerta
+meteo (20-21/08, molte chiamate e interventi per alberi/tetti pericolanti),
+proseguita con un ridisegno concordato con Massi dello stato operativo e due
+funzionalità nuove (tag nelle note, zone di competenza). Tutto sviluppato e
+provato su un layer sperimentale duplicato (`Interventi_chiamate_PT_charlie_test`,
+raggiungibile con `--env-file .env.charlie`), **la produzione sul PC del
+comando non è stata toccata**.
+
+- **Due bug reali trovati sui dati veri** (eseguendo il parser, non a occhio):
+  1. Gli interventi con più sotto-invii (`INTERVENTO="3171 /1"` e `"3171 /2"`,
+     stesso evento fisico ma squadre uscite in momenti diversi) generavano
+     **due pin sovrapposti con stati contraddittori** — es. `I-3171 /1`
+     "sul posto" e `I-3171 /2` "in rientro" alle stesse identiche coordinate.
+     Causa: il vecchio raggruppamento usava il numero letterale intero
+     (incluso `/N`) invece del numero base.
+  2. Chiamate/interventi senza `COORD_X`/`COORD_Y` venivano scartati del
+     tutto (8/51 chiamate della notte, l'intervento 3172 — ancora attivo —
+     invisibile). Causa: nessun fallback quando mancano le coordinate.
+  - **Fix**: raggruppamento per numero base (`_numero_base`, toglie il
+    suffisso `/N`) con stato aggregato sulla riga più "presente"
+    (all'epoca `PRIORITA_STATO_OPERATIVO`, poi rifatto — vedi sotto); fallback
+    sul centroide del Comune (`COMUNE_CENTROIDI`, coordinate approssimate dei
+    20 comuni della provincia di Pistoia) con nuovo campo `Posizione_stimata`
+    per segnalarlo sulla webmap. Verificato: da 36/44 a 51/51 chiamate
+    caricate, intervento 3172 non più invisibile.
+- **Layer sperimentale**: aggiunto `--env-file` a `sync_interventi.py` e
+  `verifica_campi.py` (prima leggevano sempre e solo `.env`), per poter
+  lavorare su una copia del layer di produzione senza rischi. Massi ha
+  duplicato il layer su ArcGIS Online (`Interventi_chiamate_PT_charlie_test`)
+  e creato `.env.charlie`.
+- **Ridisegno di `Stato_operativo`**, su richiesta esplicita di Massi dopo
+  aver discusso i valori plausibili dei campi (operatore VVF, non
+  sviluppatore, ma con lettura diretta e competente dei dati Oracle):
+  - **Scoperta verificata sui dati**: `STATUS` di Oracle (`A`/`P`/`S`) è un
+    attributo dell'intero intervento (identico su tutte le righe/squadre
+    dello stesso numero base — verificato su tutti i 6 interventi del
+    campione, zero eccezioni), non della singola riga come temuto in un
+    primo momento. Ipotesi di Massi confermata al 100%: `A`=assegnato,
+    `P`=sul posto, `S`=sospeso.
+  - **Un'ipotesi mia scartata da Massi**: avevo proposto che "sospeso" (tutte
+    le squadre hanno fatto `ORA_PARTENZA_LUOGO`) dovesse comunque far
+    sparire il pin dalla mappa, come faceva "in rientro" prima. Massi ha
+    corretto: un intervento sospeso **deve restare visibile** finché non
+    sparisce del tutto dal file Oracle — potrebbe essere riassegnato. Nessuna
+    logica di cancellazione nuova serve: se ne occupa già il riallineamento
+    esistente quando il numero intervento sparisce dall'XML.
+  - **Terminologia "ufficiale" del comando**: `assegnato` (sostituisce
+    "in uscita"), `sul posto` (invariato), `sospeso` (nuovo, sostituisce
+    "in rientro"/"rientrato" che sono stati eliminati dal vocabolario).
+  - **`Squadre_mezzi` ridefinito**: prima elencava tutti i mezzi mai
+    assegnati (storico), ora solo quelli **attualmente presenti** (senza
+    `ORA_PARTENZA_LUOGO`) — su richiesta esplicita "voglio sapere chi è
+    effettivamente sull'intervento in quel dato momento". Vuoto quando
+    l'intervento è sospeso, correttamente (nessuno è più lì).
+  - Codice: `PRIORITA_RIGA` (sul posto=3, assegnato=2, in attesa=1,
+    abbandonata=0) sostituisce la vecchia `PRIORITA_STATO_OPERATIVO`;
+    `STATUS_ATTESO` per un log di controllo che confronta il nostro calcolo
+    con `STATUS` di Oracle (zero discrepanze sui dati reali).
+  - `prova_riallineamento.py`: il fixture `esempi/interventi.XML` aveva
+    involontariamente `ORA_PARTENZA_LUOGO` già valorizzata dall'inizio per
+    "3109 /1" (partiva già "sospeso"), sistemato per farlo partire attivo;
+    riscritti gli scenari 3-4 per il nuovo modello (sospeso resta visibile,
+    rimozione solo alla sparizione dal file, con la guardia anti-svuotamento
+    già esistente che serve una seconda lettura vuota consecutiva).
+- **Campo `Tag`**: estrazione di `#hashtag`/`@menzioni` dalle note
+  (`_TAG_REGEX = r"[#@](\w+)"`, minuscolo, deduplicato, ordinato alfabetico).
+  Trovato un tag reale già in uso spontaneo da un operatore ("#trid" sulla
+  chiamata 2 di stanotte), a conferma che la convenzione è già nella pratica
+  del comando.
+  - **Vincolo scoperto e confermato da Massi**: `interventi.XML` non ha mai
+    un campo nota — "le note sono presenti sulle chiamate ma sembrano
+    sparire negli interventi". Note e Tag andrebbero perse quando una
+    chiamata viene assegnata.
+  - **Soluzione**: cache in memoria in `sync_interventi.py`
+    (`_stato["note_cache"]`, popolata da `aggiorna_note_cache`/
+    `note_da_chiamate` a ogni lettura delle chiamate, scade dopo 48h). Chiave
+    di corrispondenza chiamata↔intervento: `_chiave_nota` basata su
+    `DATA_CHIAMATA + ORA_CHIAMATA + COMUNE`, gli unici tre campi con lo
+    stesso significato in entrambi gli XML — il numero non si può usare
+    (`CHIAMATA` e `INTERVENTO` sono due numerazioni indipendenti, verificato:
+    la chiamata 2 e l'intervento 3149 di stanotte non hanno alcuna
+    relazione numerica).
+  - Deliberatamente **non persistita su disco** (si perde se il processo si
+    riavvia fra la chiamata e la promozione a intervento): stessa filosofia
+    "niente storage esterno" già adottata per le posizioni Telegram, il
+    rischio è ritenuto basso e la conseguenza minore (un campo vuoto, non un
+    errore).
+  - Verificato con un test end-to-end sintetico (test 10: chiamata con tag →
+    sparisce → intervento corrispondente compare con nota e tag ereditati).
+  - **Non ancora verificato in condizioni reali**: nessuna delle chiamate con
+    tag della notte campione è diventata un intervento nel periodo osservato.
+    Da testare alla prossima occasione con traffico reale — annotato come
+    prossimo passo.
+- **Campi `Zona_competenza` e `Area_emergenza`**: su richiesta di Massi di
+  assegnare un'area di competenza (poligoni disegnati dal comando, non i
+  confini comunali) a ogni chiamata/intervento.
+  - Layer poligonale reale fornito da Massi
+    (`COMPETENZE2024DEF_PT`, `services3.arcgis.com/MfVi0khS4tCyLmo3/...`):
+    **8 poligoni per 5 zone** (San Marcello, Centrale, Montemurlo, Pescia,
+    Montecatini — non 4 come stimato inizialmente da Massi a memoria), più un
+    campo `COMANDO_COMPETENTE` (Pistoia/Lucca) ignorato su sua richiesta
+    esplicita ("usa ZONA_COMPETENZA, ignora Lucca").
+  - **Scoperta tecnica**: le geometrie sono in **Web Mercator** (EPSG
+    3857/102100), non WGS84 come i punti di chiamate/interventi — serviva
+    una conversione. Implementata a mano (`_da_web_mercator`, formula
+    standard nota, nessuna libreria) invece di aggiungere una dipendenza
+    pesante (pyproj/GDAL). Aggiunto un controllo automatico sulla proiezione
+    dichiarata dalla risposta ArcGIS: se un domani il layer non fosse più
+    Web Mercator, viene loggato un avviso invece di scrivere coordinate
+    sbagliate in silenzio.
+  - Punto-in-poligono con ray-casting/regola even-odd, puro Python
+    (`_punto_in_poligono`, gestisce correttamente buchi e forme spezzate in
+    più parti) — nessuna libreria GIS (shapely), performance irrilevanti a
+    questa scala (poche decine di punti, poligoni fino a ~3200 vertici).
+  - `Area_emergenza` traduce la zona nella sigla radio usata in sala
+    (`MAPPA_AREA_EMERGENZA`): ALFA=Centrale+Montemurlo (due zone, stessa
+    sigla, confermato non essere un errore), MIKE=Montecatini,
+    DELTA=Pescia, SIERRA=San Marcello, FUORI ZONA=tutto il resto (incluse
+    zone non ancora mappate, con log di avviso).
+  - Verificato sui 6 interventi reali, risultati geograficamente plausibili:
+    Montale→Montemurlo/ALFA, Pistoia→Centrale/ALFA, Pieve a
+    Nievole/Montecatini-Terme→Montecatini/MIKE, Buggiano→Pescia/DELTA.
+- **Test**: `prova_riallineamento.py` cresciuto da 7 a 11 scenari end-to-end
+  (ArcGIS simulato in memoria, nessuna rete/credenziale), tutti passano dopo
+  ogni modifica. Campi totali sul layer passati da 26 a 29
+  (`Posizione_stimata`, `Tag`, `Zona_competenza`, `Area_emergenza` aggiunti
+  in questa sessione, solo su `.env.charlie`).
+- **Prossimo passo prioritario**: allineare la produzione sul PC del comando
+  a tutta questa logica (oggi vive solo su `.env.charlie`), dopo aver
+  verificato in condizioni reali il passaggio Note/Tag chiamata→intervento.
+
 ## 21/08/2026 — Installazione in produzione sul PC del comando, due bug reali scoperti e risolti
 
 - **Autorizzazioni ottenute**: ok del comandante e del referente informatico. Discusso e

@@ -11,7 +11,8 @@ Verifica tre cose che, se sbagliate, non danno errore ma fanno perdere ore:
 3. che la modifica sia abilitata, altrimenti applyEdits verrà respinto.
 
 Uso:
-    python verifica_campi.py
+    python verifica_campi.py                  (legge .env)
+    python verifica_campi.py .env.charlie      (legge un file di configurazione diverso)
 """
 
 import os
@@ -43,10 +44,14 @@ CAMPI_ATTESI = {
     "Enti_intervenuti": (("esriFieldTypeString",), 10),
     "Priorita": (("esriFieldTypeInteger", "esriFieldTypeSmallInteger"), None),
     "Note": (("esriFieldTypeString",), 1000),
+    "Tag": (("esriFieldTypeString",), 255),
+    "Zona_competenza": (("esriFieldTypeString",), 50),
+    "Area_emergenza": (("esriFieldTypeString",), 10),
     "Minuti_apertura": (("esriFieldTypeInteger", "esriFieldTypeSmallInteger"), None),
     "Ultimo_agg": (("esriFieldTypeDate",), None),
     "Latitudine": (("esriFieldTypeDouble",), None),
     "Longitudine": (("esriFieldTypeDouble",), None),
+    "Posizione_stimata": (("esriFieldTypeString",), 10),
 }
 
 
@@ -69,7 +74,8 @@ def campi_prodotti_dal_codice():
 
 
 def main():
-    carica_env_locale()
+    nome_env = sys.argv[1] if len(sys.argv) > 1 else ".env"
+    carica_env_locale(nome_env)
 
     layer_url = os.environ.get("ARCGIS_INTERVENTI_LAYER_URL", "").rstrip("/")
     if not layer_url:

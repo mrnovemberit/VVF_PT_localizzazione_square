@@ -57,9 +57,13 @@ indipendenti e complementari:
   normalizzazione, nessuna rete, collaudabile a secco), `sync_interventi.py`
   (rilevazione modifiche, riallineamento, ciclo, log su file), `arcgis_client.py`
   (rete: token, query, applyEdits, descrivi_layer), `verifica_campi.py`
-  (controlla i 25 campi del layer prima di scriverci).
-- Vedi **`LAYER_INTERVENTI.md`** per la creazione del layer, i 25 campi da
-  creare a mano, la configurazione e l'installazione sul PC del comando.
+  (controlla i campi del layer prima di scriverci).
+- Vedi **`LAYER_INTERVENTI.md`** per la creazione del layer, l'elenco
+  completo dei campi da creare a mano, la configurazione e l'installazione
+  sul PC del comando.
+- **Layer sperimentale `.env.charlie`**: `sync_interventi.py` e
+  `verifica_campi.py` accettano `--env-file` per puntare a una copia del
+  layer usata per provare modifiche senza toccare la produzione.
 
 ## Stato attuale del progetto
 
@@ -78,37 +82,36 @@ indipendenti e complementari:
 
 ### Flusso 2 — interventi da XML Oracle (in produzione dal 21/08/2026)
 
-- [x] `parser_xml.py`, `sync_interventi.py`, `arcgis_client.py`,
-      `verifica_campi.py` scritti; `app.py` rifattorizzato per usare
-      `arcgis_client.py` condiviso; layer creato (25 campi, privato)
-- [x] Installato sul PC di sala operativa (`C:\VVF_sync_interventi`),
-      Attività pianificata configurata e verificata attiva
-- [x] Prima scrittura reale: 30 chiamate + 7 interventi sul layer,
-      confermati sulla webmap
 - [ ] Riavviare il PC di sala operativa per confermare che l'Attività
       pianificata riparte da sola senza intervento manuale
-- [ ] Vestizione webmap a valori unici su `Stato_operativo`
+- [ ] Allineare la produzione alla nuova logica di stato (assegnato/sul
+      posto/sospeso, `Tag`, `Zona_competenza`, `Area_emergenza`): sviluppata
+      e provata solo su layer sperimentale (`.env.charlie`), non ancora
+      copiata sul PC del comando
+- [ ] Testare in condizioni reali (non sintetiche) il passaggio di
+      Note/Tag da una chiamata vera al suo intervento quando Oracle la
+      promuove nel corso della notte
+- [ ] Vestizione webmap a valori unici su `Stato_operativo` (produzione) —
+      nuovo valore `sospeso` da aggiungere alla legenda esistente
 - [ ] Tabella di decodifica di `COD_TIPOLOGIA` (le chiamate mostrano per
       ora "Codice NN")
-- [ ] Vocabolario di `STATUS` (`A`/`P`/`S` visti finora; `Stato_operativo`
-      non dipende da `STATUS` quindi non è bloccante)
 - [ ] Log duplicato per interventi senza coordinate (cosmetico)
-- [ ] Geocodifica delle chiamate senza coordinate (14/30 nella prima
-      estrazione reale restano fuori mappa per design, non è un bug)
 
 ### Completato
 
+- **Ridisegno stato interventi (sospeso), Tag e Zona_competenza** il
+  21/08/2026: sui dati reali di una notte di allerta meteo, risolti due bug
+  (sotto-invii `/1`/`/2` duplicavano il pin, coordinate mancanti facevano
+  sparire interventi attivi); nuovi campi `Tag`, `Zona_competenza`,
+  `Area_emergenza`. Tutto provato solo su `.env.charlie`. Dettagli nel diario.
 - **Flusso 2 in produzione sul PC di sala operativa** il 21/08/2026: due bug
   reali scoperti sui dati veri e risolti (Chiave non univoca — il numero
   chiamata riparte ogni notte — e orari con suffisso `-s` che si perdevano
   nel parsing), scrittura e Attività pianificata verificate attive.
   Dettagli nel diario.
-- **Flusso 2 funzionante end-to-end in locale** il 19/08/2026: parser,
-  sincronizzatore, layer creato, primo test di scrittura sugli esempi.
-- **Deploy su Render e verifica end-to-end in produzione** il 08/08/2026:
-  repo GitHub privato creato, deploy Render riuscito, webhook definitivo
-  registrato, scrittura/aggiornamento/movimento confermati sia da query
-  diretta ArcGIS che visivamente sulla webmap.
+- **Milestone precedenti**: deploy su Render e verifica end-to-end del
+  flusso 1 (08/08/2026); flusso 2 funzionante end-to-end in locale, primo
+  layer creato (19/08/2026). Dettagli nel diario.
 
 ## Decisioni prese (e perché)
 
@@ -166,11 +169,25 @@ https://services3.arcgis.com/MfVi0khS4tCyLmo3/arcgis/rest/services/Posizione_par
 Elenco completo, tipi e lunghezze in `LAYER_INTERVENTI.md`. Campi chiave:
 `Chiave` (chiave di riallineamento, `C-<n>-<GGMMAAAA>` / `I-<n>-<GGMMAAAA>` —
 la data è necessaria perché il numero di chiamata riparte da 1 ogni notte,
-vedi diario 21/08/2026), `Fase` (chiamata in attesa / intervento in corso),
-`Stato_operativo` (in attesa / in uscita / sul posto / in rientro — non
-esiste negli XML, è derivato dagli orari ed è il campo su cui si veste la
-mappa). Dati personali degli XML (`RICHIEDENTE`, `TELE_NUMERO`, `NOME`,
-`COGNOME`, `COGNOME_NOME`) non vengono letti dal
+vedi diario 21/08/2026; per gli interventi `<n>` è il numero base, senza il
+suffisso `/N` del sotto-invio: più squadre uscite in momenti diversi sullo
+stesso evento condividono un solo pin), `Fase` (chiamata in attesa /
+intervento in corso), `Stato_operativo` (in attesa / assegnato / sul posto /
+sospeso — non esiste negli XML, è derivato dagli orari; corrisponde al campo
+Oracle `STATUS`, A/P/S, verificato ma non usato per il calcolo — vedi
+checklist sopra). `sospeso` = nessuna squadra più fisicamente presente ma
+l'intervento non è ancora sparito dal file: resta visibile, non viene
+rimosso dalla mappa. `Squadre_mezzi` elenca solo i mezzi attualmente presenti
+(fotografia in tempo reale, non storico). `Posizione_stimata` segnala un pin
+sul centroide del Comune quando l'XML non ha coordinate valide. `Tag`
+estrae `#hashtag`/`@menzioni` dalle note (es. `#autoscala`): siccome
+`interventi.XML` non ha un campo nota proprio, `Note`/`Tag` vengono
+ereditati dalla chiamata d'origine tramite una cache in memoria in
+`sync_interventi.py` (si perde solo se il processo si riavvia nel
+frattempo). `Zona_competenza`/`Area_emergenza` derivano da un layer
+poligonale facoltativo (`ARCGIS_ZONA_LAYER_URL`, punto-in-poligono, vedi
+`LAYER_INTERVENTI.md`). Dati personali degli XML (`RICHIEDENTE`,
+`TELE_NUMERO`, `NOME`, `COGNOME`, `COGNOME_NOME`) non vengono letti dal
 parser — esclusione alla fonte, non un filtro sulla mappa.
 
 ## Stack tecnico

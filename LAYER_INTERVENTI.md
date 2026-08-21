@@ -23,7 +23,7 @@ abilitata** (Abilita modifica, con aggiunta/aggiornamento/eliminazione). Senza
 questo `applyEdits` risponde "Operation not allowed": è la causa più comune di
 un layer che sembra creato bene ma non riceve nulla.
 
-## 2. Aggiungere i 25 campi
+## 2. Aggiungere i 29 campi
 
 Dalla scheda **Dati → Campi → Aggiungi**. Tre avvertenze prima di cominciare:
 
@@ -53,18 +53,22 @@ le chiamate o solo per gli interventi, e restano vuoti nell'altro caso.
 | `Ora_uscita` | Data | | Uscita della squadra |
 | `Ora_arrivo` | Data | | Arrivo sul posto |
 | `Ora_partenza_luogo` | Data | | Partenza dal luogo dell'intervento |
-| `Ora_rientro` | Data | | Normalmente vuoto: i rientrati non vengono scritti sul layer. Il campo serve se un domani si vorranno tenere |
-| `Stato_oracle` | Stringa | 10 | `STATUS` così come arriva dal software |
-| `Stato_operativo` | Stringa | 30 | **Campo per la vestizione**: `in attesa`, `in uscita`, `sul posto`, `in rientro` |
-| `Squadre_mezzi` | Stringa | 500 | Tutti i mezzi dell'intervento, separati da `; ` |
+| `Ora_rientro` | Data | | Rientro fisico in caserma. Dato grezzo, non influenza più `Stato_operativo` né la presenza sulla mappa |
+| `Stato_oracle` | Stringa | 10 | `STATUS` così come arriva dal software: `A`/`P`/`S`, corrisponde rispettivamente ad `assegnato`/`sul posto`/`sospeso` (verificato sui dati reali, non usato per calcolare `Stato_operativo` — solo per un log di controllo se le due letture non coincidono) |
+| `Stato_operativo` | Stringa | 30 | **Campo per la vestizione**: `in attesa`, `assegnato`, `sul posto`, `sospeso`. `sospeso` = nessuna squadra è più fisicamente presente (tutte hanno fatto `ORA_PARTENZA_LUOGO`) ma l'intervento non è ancora sparito dal file Oracle: resta visibile, non viene rimosso dalla mappa |
+| `Squadre_mezzi` | Stringa | 500 | Solo i mezzi **attualmente presenti** sull'intervento (non hanno ancora fatto `ORA_PARTENZA_LUOGO`), separati da `; ` — è la fotografia di chi c'è ora, non uno storico. Vuoto quando l'intervento è `sospeso` |
 | `Num_mezzi` | Numero intero | | Quanti mezzi sono impegnati |
 | `Enti_intervenuti` | Stringa | 10 | |
 | `Priorita` | Numero intero | | Solo chiamate |
-| `Note` | Stringa | 1000 | Note libere dell'operatore di sala |
+| `Note` | Stringa | 1000 | Note libere dell'operatore di sala. Per gli interventi: `interventi.XML` non ha un campo nota proprio, quindi è ereditata dalla chiamata d'origine (stesso `DATA_CHIAMATA`+`ORA_CHIAMATA`+`COMUNE`) finché il sincronizzatore la ricorda — resta vuota se il processo è stato riavviato nel frattempo |
+| `Tag` | Stringa | 255 | Etichette tipo `#autoscala` o `@trid` estratte dalla nota, minuscole, separate da `; ` — per filtrare interventi/chiamate che richiedono una risorsa specifica. Stessa eredità di `Note` per gli interventi |
 | `Minuti_apertura` | Numero intero | | Minuti trascorsi dalla chiamata: utile per far risaltare gli interventi lunghi |
 | `Ultimo_agg` | Data | | Quando lo script ha scritto per l'ultima volta questa feature |
 | `Latitudine` | Numero decimale | | Duplicata rispetto alla geometria, comoda in tabella |
 | `Longitudine` | Numero decimale | | Come sopra |
+| `Posizione_stimata` | Stringa | 10 | Vuoto per posizione esatta; `Sì` quando l'XML non aveva COORD_X/COORD_Y e il punto è il centroide del Comune (vedi §7 per la vestizione) |
+| `Zona_competenza` | Stringa | 50 | Nome della zona (poligoni disegnati dal comando, non i confini comunali) in cui cade il punto, o `Fuori zona`. Vuoto se `ARCGIS_ZONA_LAYER_URL` non è configurato — funzionalità del tutto facoltativa |
+| `Area_emergenza` | Stringa | 10 | Sigla radio della zona (`ALFA`/`MIKE`/`DELTA`/`SIERRA`/`FUORI ZONA` — vedi `MAPPA_AREA_EMERGENZA` in `parser_xml.py` per aggiungerne). Derivato da `Zona_competenza`, stessa condizione per essere vuoto |
 
 Copiare infine l'URL REST del layer, **indice `/0` compreso**, e metterlo in
 `.env` alla voce `ARCGIS_INTERVENTI_LAYER_URL`. L'URL si trova in fondo alla
@@ -85,9 +89,24 @@ XML_CARTELLA                                (dove Oracle scrive i due XML)
 funziona anche lanciato dall'Utilità di pianificazione, dove non c'è una shell
 che abbia già impostato le variabili.
 
+**Zone di competenza (facoltativo)**: se esiste già un layer poligonale con le
+aree di competenza del comando, aggiungere anche:
+
+```
+ARCGIS_ZONA_LAYER_URL=https://.../FeatureServer/0   (il layer POLIGONALE delle zone, non quello di chiamate/interventi)
+```
+
+Il layer deve avere un campo testo `ZONA_COMPETENZA` con il nome della zona.
+Le coordinate vengono convertite automaticamente da Web Mercator (EPSG
+3857/102100) — la proiezione predefinita per un layer disegnato in ArcGIS
+Online, verificata sul layer reale del comando. Un layer in un'altra
+proiezione non è supportato: lo script se ne accorge da solo e logga un
+avviso invece di caricare coordinate sbagliate. Senza questa variabile,
+`Zona_competenza` resta semplicemente vuoto — nessun errore.
+
 ## 4. Controllare che il layer sia a posto
 
-Prima di scriverci sopra, un controllo automatico dei 25 campi:
+Prima di scriverci sopra, un controllo automatico dei 29 campi:
 
 ```
 python verifica_campi.py
@@ -196,12 +215,33 @@ qualcosa va storto in un ciclo, riprova al successivo senza toccare il layer.
 
 ## 7. Vestizione della webmap
 
-- Simbologia **Valori unici** su `Stato_operativo` — è il campo pensato apposta.
+- Simbologia **Valori unici** su `Stato_operativo` (`in attesa`, `assegnato`,
+  `sul posto`, `sospeso`) — è il campo pensato apposta. Vale la pena rendere
+  `sospeso` visivamente distinto (es. colore spento/grigio): significa che
+  nessuna squadra è più fisicamente lì, ma l'intervento non è ancora chiuso
+  in Oracle.
 - Filtro su `Fase` per accendere o spegnere le chiamate ancora in attesa.
 - Nessun filtro temporale, a differenza del layer delle posizioni Telegram: qui
-  il riallineamento garantisce già che ci sia solo ciò che è realmente aperto.
+  il riallineamento garantisce già che ci sia solo ciò che è realmente aperto
+  (compreso un intervento sospeso, che resta finché non sparisce dal file).
 - `Minuti_apertura` per un filtro tipo "aperti da più di 60 minuti", o come
   dimensione del simbolo.
+- **`Posizione_stimata`**: aggiungere una seconda regola di simbologia (es.
+  "Valori unici" su questo campo, oppure una regola con arcade
+  `$feature.Posizione_stimata = 'Sì'`) che disegni quei punti in modo
+  visibilmente diverso — es. contorno tratteggiato o icona a forma di comune
+  invece che di pin puntuale. Quei punti sono sul centroide del Comune, non
+  sull'indirizzo reale: senza un segnale visivo un operatore potrebbe fidarsi
+  della posizione come se fosse precisa.
+- **`Tag`**: per filtrare chiamate/interventi che richiedono una risorsa
+  specifica, filtro testuale tipo `Tag contiene autoscala` (il campo è
+  `"; "`-separato, quindi "contiene" funziona anche con più tag sulla stessa
+  feature). Non è un campo adatto a "Valori unici" — il vocabolario è libero,
+  deciso di volta in volta da chi scrive la nota, non un elenco fisso.
+- **`Zona_competenza`**: questo sì un campo a vocabolario chiuso (i nomi delle
+  zone disegnate, più `Fuori zona`), adatto a "Valori unici" per un colpo
+  d'occhio su quale zona ha più traffico in questo momento, o come filtro
+  dedicato per "mostrami solo la mia zona".
 
 ## Nota sui dati
 
