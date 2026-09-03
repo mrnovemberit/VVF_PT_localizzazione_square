@@ -212,31 +212,41 @@ def _suffisso_data(elemento):
 
 
 # ---------------------------------------------------------------------------
-# Tag nelle note (es. "#autoscala", "@trid") e corrispondenza chiamata/intervento
+# Corrispondenza chiamata/intervento (per far ereditare la nota)
 # ---------------------------------------------------------------------------
-_TAG_REGEX = re.compile(r"[#@](\w+)", re.UNICODE)
+_SUFFISSO_INDIRIZZO = re.compile(r"\s*\([^)]*\)\s*$")
 
 
-def estrai_tag(nota):
-    """Etichette tipo #autoscala o @trid trovate nel testo, minuscole e senza duplicati."""
-    if not nota:
-        return []
-    return sorted({m.group(1).lower() for m in _TAG_REGEX.finditer(nota)})
+def _normalizza_indirizzo(testo):
+    """
+    Toglie annotazioni fra parentesi (es. "Via Dante Alighieri (*)", marcatura
+    di Oracle non riportata sull'intervento corrispondente) e uniforma spazi e
+    maiuscole, solo per il confronto — l'Indirizzo mostrato in mappa resta
+    quello originale.
+    """
+    if not testo:
+        return None
+    pulito = _SUFFISSO_INDIRIZZO.sub("", testo).strip().casefold()
+    pulito = re.sub(r"\s+", " ", pulito)
+    return pulito or None
 
 
 def _chiave_nota(elemento):
     """
     Chiave di corrispondenza fra una chiamata e l'intervento in cui diventa,
-    basata su DATA_CHIAMATA + ORA_CHIAMATA + COMUNE: sono gli unici tre campi
-    presenti con lo stesso significato in entrambi gli XML. Non si può usare
-    il numero (CHIAMATA e INTERVENTO sono due numerazioni indipendenti).
+    basata su DATA_CHIAMATA + ORA_CHIAMATA + INDIRIZZO: il comune da solo era
+    troppo grezzo (più chiamate diverse nello stesso comune alla stessa ora
+    non sono rari nelle notti di allerta). Il tag dell'indirizzo cambia nome
+    fra i due XML (LOC_IND nelle chiamate, INDIRIZZO negli interventi), quindi
+    si cercano entrambi. Non si può usare il numero (CHIAMATA e INTERVENTO
+    sono due numerazioni indipendenti).
     """
     data = _testo(elemento, "DATA_CHIAMATA")
     ora = _testo(elemento, "ORA_CHIAMATA")
-    comune = _testo(elemento, "COMUNE")
-    if not (data and ora and comune):
+    indirizzo = _normalizza_indirizzo(_testo(elemento, "INDIRIZZO") or _testo(elemento, "LOC_IND"))
+    if not (data and ora and indirizzo):
         return None
-    return "{}|{}|{}".format(data, ora, comune.strip().casefold())
+    return "{}|{}|{}".format(data, ora, indirizzo)
 
 
 # ---------------------------------------------------------------------------
@@ -351,6 +361,159 @@ def area_emergenza(zona):
     return sigla or "FUORI ZONA"
 
 
+# Tabella di decodifica COD_TIPOLOGIA del software Oracle del comando.
+COD_TIPOLOGIA_DESCRIZIONI = {
+    "1": "Incendio normale (generico)",
+    "2": "Incendio ed esplosione",
+    "3": "Esplosione da sostanza esplodente",
+    "4": "Esplosione (escluso esplosione da sostanza esplodente)",
+    "301": "Incendio bosco, sterpaglie, colture",
+    "302": "Incidente con incendio di mezzo trasport. merci pericolose",
+    "365": "Incendio Rifiuti",
+    "5": "Incendio aeromobile",
+    "7": "Emergenza carrello aeromobile bloccato",
+    "8": "Recupero aeromobile",
+    "9": "Ricerca aeromobile",
+    "303": "Incendio in sedime aeroportuale",
+    "304": "Emergenza aeroportuale di altro genere",
+    "305": "Incidente aeromobile di altro genere",
+    "6": "Incendio nave o traghetto",
+    "306": "Incendi natanti diversi da navi e traghetti",
+    "307": "Recupero di piccoli natanti",
+    "308": "Soccorso a imbarcazione senza governo",
+    "309": "Ricerca/soccorso in amb. acquatico di imbarcazioni o natanti",
+    "310": "Operazioni antinquinamento",
+    "311": "Ricerca e/o soccorso a persona in mare (SAR)",
+    "312": "Recupero di ostacoli alla navigazione",
+    "313": "Supporto nautico per operazioni a terra",
+    "362": "Incidente nautico",
+    "10": "Incidente stradale generico",
+    "11": "Incidente stradale con mezzo trasportante merci pericolose",
+    "12": "Ribaltamento di mezzo trasportante merci pericolose",
+    "13": "Rimozione ostacoli non dovuti al traffico",
+    "314": "Incidente stradale in galleria",
+    "14": "Recupero merci e beni",
+    "15": "Recupero sostanze radioattive",
+    "16": "Valanghe",
+    "315": "Recupero parafulmini radioattivi",
+    "348": "Recupero sostanza pericolosa",
+    "358": "Recupero autovetture e veicoli",
+    "18": "Recupero merci avariate",
+    "19": "Cedimento terreno, voragine",
+    "20": "Cedimento sede stradale",
+    "21": "Dissesto statico di elementi costruttivi",
+    "316": "Frane",
+    "317": "Valanghe, slavine",
+    "318": "Crollo parziale di elementi strutturali",
+    "319": "Crollo generalizzato di opere e costruzioni",
+    "351": "Smontaggio controllato di elementi costruttivi",
+    "352": "Demolizioni",
+    "353": "Rimozione macerie",
+    "354": "Verifiche stabilità edifici manufatti frane voragini",
+    "363": "Verifiche statiche per compilazione schede AEDES",
+    "364": "Verifiche statiche speditive (TRIAGE)",
+    "22": "Danni d'acqua in genere",
+    "23": "Straripamenti, inondazioni, mareggiate",
+    "24": "Rifornimento idrico",
+    "25": "Prosciugamento in genere",
+    "320": "Danni d'acqua per rott./fuoriusc. da tubaz., canali e simili",
+    "29": "Recupero salme",
+    "30": "Recupero animali morti",
+    "34": "Apertura porte e finestre",
+    "35": "Incidenti sul lavoro",
+    "36": "Servizio di assistenza (generico)",
+    "37": "Fuga gas",
+    "38": "Lavaggio strada",
+    "321": "Incidente ferroviario",
+    "322": "Scoppio (cedimento meccanico)",
+    "346": "Alberi pericolanti",
+    "349": "Rimozione neve dai tetti",
+    "350": "Coperture tetti",
+    "355": "Progettazione opere provisionali",
+    "356": "Opere provisionali senza progettazione",
+    "357": "Opere provisionali con progettazione",
+    "359": "Messa in sicurezza serbatoi GPL",
+    "360": "Interventi impianti di servizio acqua, energia elettr. gas",
+    "366": "Attivita' di polizia giudiziaria",
+    "26": "Soccorso a persone",
+    "27": "Salvataggio persone",
+    "28": "Salvataggio animali",
+    "31": "Trasporto ammalati o infortunati",
+    "33": "Ascensori bloccati",
+    "324": "Ricerca persona (SAR)",
+    "325": "Recupero animali",
+    "327": "Assistenza Trattamento Sanitario Obbl. (TSO)",
+    "328": "Bonifica da insetti",
+    "329": "Assistenza per abbandono locali e/o ambienti",
+    "330": "Recupero con verricello elicottero",
+    "331": "Ricerca e ricognizione aerea",
+    "332": "Ricerca da allarme COSPAS e simili",
+    "333": "Trasporto al gancio baricentrico elicottero",
+    "334": "Mancata adozione di dispositivi di protezione individuale",
+    "347": "Messa in sicurezza di imbarcazioni, natanti e/o galleggianti",
+    "335": "Fuoriuscita di sostanza infiammabile/combustibile",
+    "336": "Fuoriuscita di sostanza comburente",
+    "337": "Fuoriuscita di sostanza tossica",
+    "338": "Fuoriuscita di sostanza asfissiante",
+    "339": "Fuoriuscita di sostanza radioattiva",
+    "340": "Fuoriuscita di sostanza biologica",
+    "341": "Fuoriuscita di sostanza combustibile in polvere",
+    "342": "Fuoriuscita di sostanza infiammabile seguita da incendio",
+    "343": "Fuoriuscita di altro tipo di sostanza",
+    "344": "Inquinamento acque superficiali o di falda",
+    "345": "Inquinamento di aria",
+    "361": "Monitoraggio strumentale presenza di sostanze pericolose",
+    "400": "Socc., salvataggi persone (anche recupero vittime) - Sisma",
+    "401": "Socc., salvataggi animali (anche recupero carcasse) - Sisma",
+    "402": "Recupero beni privati e pubblici-Sisma",
+    "403": "Recupero autovetture e veicoli - Sisma",
+    "404": "Rimozione alberi - Sisma",
+    "405": "Ass. popolo, trasporti viveri, accesso aree peric. - Sisma",
+    "406": "Rimozione parti pericolanti, tegole, camini ecc. - Sisma",
+    "407": "Rimozione neve dai tetti - Sisma",
+    "408": "Coperture tetti - Sisma",
+    "409": "Smontaggio controllato di elementi costruttivi - Sisma",
+    "410": "Demolizioni - Sisma",
+    "411": "Rimozione macerie - Sisma",
+    "412": "Verifiche stabilità edifici manufatti frane voragini - Sisma",
+    "413": "Ripristino viabilità, frane, cedimenti, voragini - Sisma",
+    "414": "Progettazione opere provisionali - Sisma",
+    "415": "Opere provisionali senza progettazione - Sisma",
+    "416": "Opere provisionali con progettazione - Sisma",
+    "417": "Recupero merci avariate - Sisma",
+    "418": "Messa in sicurezza serbatoi GPL - Sisma",
+    "419": "Recupero e messa in sicurezza materiali pericolosi - Sisma",
+    "420": "Interv. impianti servizio acqua, energia elettr. gas - Sisma",
+    "421": "Monitoraggio strumentale presenza sost. pericolose - Sisma",
+    "422": "Assistenza tecnica in genere - Sisma",
+    "423": "Supporto sistemazione logistica della popolazione - Sisma",
+    "424": "Spegnimento incendio - Sisma",
+    "425": "Svuotamento aree allagate, danni d'acqua, maltempo - Sisma",
+    "90": "Emergenza protezione civile",
+    "900": "Supporto ai Sindaci per attivita' di informazione",
+    "901": "Assistenza attivita' di Protezione Civile e Ospedali",
+    "902": "Igienizzazione locali pubblici o aree esterne",
+    "903": "Supporto trasporto materiale urgente",
+    "904": "Supporto gestione comunale persone senza dimora",
+}
+
+
+def descrivi_tipologia(codice):
+    """
+    Traduce COD_TIPOLOGIA nella descrizione testuale della tabella del
+    comando. "Codice NN" per un codice non ancora presente in
+    COD_TIPOLOGIA_DESCRIZIONI — se il comando ne introduce uno nuovo, lo si
+    nota da un log invece che da un valore silenziosamente sbagliato.
+    """
+    if not codice:
+        return None
+    descrizione = COD_TIPOLOGIA_DESCRIZIONI.get(codice.strip())
+    if descrizione is None:
+        log.warning("COD_TIPOLOGIA '%s' senza descrizione nota, mostrato come codice", codice)
+        return "Codice {}".format(codice)
+    return descrizione
+
+
 def _geometria(elemento):
     """
     Punto WGS84 dalle coordinate del record. COORD_X è la longitudine.
@@ -404,14 +567,16 @@ def _adesso_ms():
 # ---------------------------------------------------------------------------
 def stato_operativo(orari):
     """
-    Traduce gli orari valorizzati nella fase in cui si trova la squadra.
+    Traduce gli orari valorizzati nella fase in cui si trova una singola
+    riga/squadra di un intervento (uso interno, per scegliere la riga
+    "migliore" fra sotto-invii — non è più scritto come attributo del layer,
+    dove il campo di stato è ormai solo Stato_oracle).
 
-    Per le chiamate è sempre "in attesa" (impostato direttamente in
-    leggi_chiamate). Per gli interventi, "abbandonata" è la sola risposta
-    valida per una singola riga/squadra: è compito del chiamante (vedi
-    leggi_interventi) tradurla in "sospeso" quando TUTTE le squadre di un
-    intervento hanno abbandonato il luogo — un intervento con anche una
-    sola squadra ancora sul posto non deve mai risultare sospeso.
+    "abbandonata" è la sola risposta valida per una singola riga/squadra: è
+    compito del chiamante (vedi leggi_interventi) tradurla in "sospeso"
+    quando TUTTE le squadre di un intervento hanno abbandonato il luogo — un
+    intervento con anche una sola squadra ancora sul posto non deve mai
+    risultare sospeso.
     """
     if orari.get("Ora_partenza_luogo"):
         return "abbandonata"
@@ -420,6 +585,29 @@ def stato_operativo(orari):
     if orari.get("Ora_uscita"):
         return "assegnato"
     return "in attesa"
+
+
+def _formatta_squadre_mezzi(mezzi_grezzi):
+    """
+    Raggruppa "SQUADRA+MEZZO" per squadra, così una squadra con più mezzi
+    compare una sola volta invece di ripetersi per ognuno (es. "DELTA
+    1+APS MAN" e "DELTA 1+CA BOSCHI_3" diventano "DELTA 1; APS MAN + CA
+    BOSCHI_3"). Squadre diverse sono separate da " | " per non confondersi
+    con il "; " già usato dentro il singolo blocco.
+    """
+    per_squadra = {}
+    for grezzo in mezzi_grezzi:
+        squadra, sep, mezzo = grezzo.partition("+")
+        squadra = squadra.strip()
+        mezzo = mezzo.strip() if sep else ""
+        elenco = per_squadra.setdefault(squadra, [])
+        if mezzo and mezzo not in elenco:
+            elenco.append(mezzo)
+    blocchi = [
+        "{}; {}".format(squadra, " + ".join(mezzi)) if mezzi else squadra
+        for squadra, mezzi in sorted(per_squadra.items())
+    ]
+    return " | ".join(blocchi)
 
 
 # ---------------------------------------------------------------------------
@@ -457,8 +645,6 @@ def leggi_chiamate(percorso, adesso_ms=None, poligoni=None):
         chiave = "C-{}-{}".format(numero, suffisso_data) if suffisso_data else "C-{}".format(numero)
 
         orari = _orari(chiamata)
-        # Nelle chiamate la tipologia è un codice numerico: finché non abbiamo
-        # la tabella di decodifica del software Oracle lo mostriamo come tale.
         codice = _testo(chiamata, "COD_TIPOLOGIA")
         nota = _testo(chiamata, "NOTE_INTERVENTO")
         zona = zona_competenza(lat, lon, poligoni)
@@ -467,17 +653,15 @@ def leggi_chiamate(percorso, adesso_ms=None, poligoni=None):
             "Chiave": chiave,
             "Fase": FASE_CHIAMATA,
             "Numero": numero,
-            "Tipologia": "Codice {}".format(codice) if codice else None,
+            "Tipologia": descrivi_tipologia(codice),
             "Dettaglio_tipologia": _testo(chiamata, "DETTAGLIO_TIPOLOGIA"),
             "Indirizzo": _testo(chiamata, "LOC_IND"),
             "Civico_km": _testo(chiamata, "CIV_KM"),
             "Comune": _testo(chiamata, "COMUNE"),
             "Provincia": _testo(chiamata, "SIGLA_PROVINCIA"),
             "Data_chiamata": orari.get("Data_chiamata"),
-            "Stato_operativo": "in attesa",
             "Priorita": _intero(chiamata, "PRIORITA"),
             "Note": nota,
-            "Tag": "; ".join(estrai_tag(nota)) or None,
             "Zona_competenza": zona,
             "Area_emergenza": area_emergenza(zona),
             "Minuti_apertura": _minuti_da(orari.get("Data_chiamata"), adesso_ms),
@@ -493,12 +677,12 @@ def leggi_chiamate(percorso, adesso_ms=None, poligoni=None):
 
 def note_da_chiamate(percorso):
     """
-    Note delle chiamate (con eventuali tag), indicizzate per _chiave_nota.
+    Note delle chiamate, indicizzate per _chiave_nota.
 
     Serve a "ricordare" la nota mentre la chiamata è ancora in coda: appena
     diventa un intervento, Oracle smette di riportarla da qualunque parte, e
     senza questo lo sganciamento della squadra ne farebbe perdere il
-    contenuto (compresi i tag tipo #autoscala usati per il filtro).
+    contenuto.
     """
     radice = ET.parse(percorso).getroot()
     risultato = {}
@@ -509,7 +693,7 @@ def note_da_chiamate(percorso):
         chiave = _chiave_nota(chiamata)
         if chiave is None:
             continue
-        risultato[chiave] = {"nota": nota, "tag": estrai_tag(nota)}
+        risultato[chiave] = {"nota": nota}
     return risultato
 
 
@@ -531,9 +715,9 @@ def leggi_interventi(percorso, adesso_ms=None, stati_chiusi=(), note_cache=None,
     perché un'altra squadra ha già lasciato il luogo.
 
     Un intervento resta scritto sul layer anche quando TUTTE le squadre hanno
-    abbandonato il luogo (Stato_operativo diventa "sospeso", Squadre_mezzi
-    resta vuoto): non sappiamo se verrà chiuso o riassegnato, e sparire dalla
-    mappa toglierebbe visibilità su qualcosa che potrebbe tornare attivo. La
+    abbandonato il luogo (Stato_oracle diventa "S", Squadre_mezzi resta
+    vuoto): non sappiamo se verrà chiuso o riassegnato, e sparire dalla mappa
+    toglierebbe visibilità su qualcosa che potrebbe tornare attivo. La
     rimozione avviene solo quando l'intervento sparisce del tutto dal file —
     se ne occupa già il riallineamento in sync_interventi.py, non serve
     scartare nulla qui (stati_chiusi resta solo una valvola manuale per un
@@ -542,7 +726,7 @@ def leggi_interventi(percorso, adesso_ms=None, stati_chiusi=(), note_cache=None,
     note_cache (opzionale): dizionario prodotto da note_da_chiamate() e
     mantenuto da sync_interventi.py fra un ciclo e l'altro. L'XML degli
     interventi non ha un campo nota: se la chiamata d'origine è ancora in
-    cache (vedi _chiave_nota), Note e Tag vengono ereditati da lì.
+    cache (vedi _chiave_nota), Note viene ereditata da lì.
 
     poligoni (opzionale): lista prodotta da poligoni_da_query(), usata per
     calcolare Zona_competenza. Senza poligoni il campo resta None.
@@ -641,10 +825,8 @@ def leggi_interventi(percorso, adesso_ms=None, stati_chiusi=(), note_cache=None,
             "Comune": _testo(riga_rif, "COMUNE"),
             "Provincia": _testo(riga_rif, "SIGLA_PROVINCIA"),
             "Stato_oracle": migliore["stato_oracle"],
-            "Stato_operativo": stato_gruppo,
             "Enti_intervenuti": _testo(riga_rif, "ENTI_INTERVENUTI"),
             "Note": nota_ereditata.get("nota"),
-            "Tag": "; ".join(nota_ereditata.get("tag", [])) or None,
             "Zona_competenza": zona,
             "Area_emergenza": area_emergenza(zona),
             "Minuti_apertura": _minuti_da(migliore["orari"].get("Data_chiamata"), adesso_ms),
@@ -658,7 +840,7 @@ def leggi_interventi(percorso, adesso_ms=None, stati_chiusi=(), note_cache=None,
         # Solo le squadre ancora presenti: è la fotografia di chi c'è ora,
         # non lo storico di chi è mai intervenuto. Se sospeso, resta vuoto.
         mezzi = sorted({r["mezzo"] for r in righe if r["stato"] != "abbandonata" and r["mezzo"]})
-        attributi["Squadre_mezzi"] = "; ".join(mezzi) or None
+        attributi["Squadre_mezzi"] = _formatta_squadre_mezzi(mezzi) or None
         attributi["Num_mezzi"] = len(mezzi)
 
         feature.append({"attributes": attributi, "geometry": geometria})

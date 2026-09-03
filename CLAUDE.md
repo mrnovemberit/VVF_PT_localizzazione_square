@@ -57,7 +57,9 @@ indipendenti e complementari:
   normalizzazione, nessuna rete, collaudabile a secco), `sync_interventi.py`
   (rilevazione modifiche, riallineamento, ciclo, log su file), `arcgis_client.py`
   (rete: token, query, applyEdits, descrivi_layer), `verifica_campi.py`
-  (controlla i campi del layer prima di scriverci).
+  (controlla i campi del layer prima di scriverci). `costruisci_standalone.py`
+  genera, a partire da questi, un `sync_interventi.py` unico (+ `verifica_campi.py`
+  adattato) per installare un solo file invece di tre, es. sulla chiavetta.
 - Vedi **`LAYER_INTERVENTI.md`** per la creazione del layer, l'elenco
   completo dei campi da creare a mano, la configurazione e l'installazione
   sul PC del comando.
@@ -80,25 +82,27 @@ indipendenti e complementari:
 - [ ] Campo `Moving_status` (18/08/2026): creare il campo sul layer e il
       renderer "Valori unici" sulla webmap
 
-### Flusso 2 — interventi da XML Oracle (in produzione dal 21/08/2026)
+### Flusso 2 — interventi da XML Oracle
+
+Sviluppo attivo solo su `.env.charlie` (vedi **Decisioni prese**); la
+produzione (`Interventi_chiamate2_PT`) resta ferma al 21/08/2026 come backup.
 
 - [ ] Riavviare il PC di sala operativa per confermare che l'Attività
       pianificata riparte da sola senza intervento manuale
-- [ ] Allineare la produzione alla nuova logica di stato (assegnato/sul
-      posto/sospeso, `Tag`, `Zona_competenza`, `Area_emergenza`): sviluppata
-      e provata solo su layer sperimentale (`.env.charlie`), non ancora
-      copiata sul PC del comando
-- [ ] Testare in condizioni reali (non sintetiche) il passaggio di
-      Note/Tag da una chiamata vera al suo intervento quando Oracle la
-      promuove nel corso della notte
-- [ ] Vestizione webmap a valori unici su `Stato_operativo` (produzione) —
-      nuovo valore `sospeso` da aggiungere alla legenda esistente
-- [ ] Tabella di decodifica di `COD_TIPOLOGIA` (le chiamate mostrano per
-      ora "Codice NN")
+- [ ] Testare in condizioni reali (non sintetiche, su un ciclo continuo) il
+      passaggio di `Note` da una chiamata vera al suo intervento quando
+      Oracle la promuove nel corso della notte
+- [ ] Vestizione **webmap** (non dashboard, già fatta) a valori unici su
+      `Stato_oracle` — `sospeso` da aggiungere alla legenda esistente
 - [ ] Log duplicato per interventi senza coordinate (cosmetico)
 
 ### Completato
 
+- **Campi allineati su `_charlie_test`** il 03/09/2026: tolto
+  `Stato_operativo`, `Squadre_mezzi` per squadra, chiave Note su indirizzo,
+  tabella `COD_TIPOLOGIA`. Dettagli nel diario.
+- **File unico per la chiavetta e colore righe dashboard per stato** il
+  03/09/2026: `costruisci_standalone.py` (nuovo). Dettagli nel diario.
 - **Ridisegno stato interventi (sospeso), Tag e Zona_competenza** il
   21/08/2026: sui dati reali di una notte di allerta meteo, risolti due bug
   (sotto-invii `/1`/`/2` duplicavano il pin, coordinate mancanti facevano
@@ -109,9 +113,6 @@ indipendenti e complementari:
   chiamata riparte ogni notte — e orari con suffisso `-s` che si perdevano
   nel parsing), scrittura e Attività pianificata verificate attive.
   Dettagli nel diario.
-- **Milestone precedenti**: deploy su Render e verifica end-to-end del
-  flusso 1 (08/08/2026); flusso 2 funzionante end-to-end in locale, primo
-  layer creato (19/08/2026). Dettagli nel diario.
 
 ## Decisioni prese (e perché)
 
@@ -144,6 +145,11 @@ indipendenti e complementari:
 - **Repository GitHub privato**: `CLAUDE.md` contiene l'URL reale del
   Feature Layer ArcGIS, quindi il repo è privato invece che pubblico
   (riguarda posizioni in tempo reale di operatori durante interventi).
+- **Produzione congelata come backup, si lavora solo su `.env.charlie`**
+  (03/09/2026): invece di migrare lo schema di `Interventi_chiamate2_PT` in
+  produzione (ancora al 21/08), si è scelto di lasciarla ferma com'è finché
+  non si deciderà di sostituirla — meno rischio sul sistema che la sala
+  operativa usa davvero ogni notte.
 
 ## Campi Feature Layer 1 (`Posizione_partenze_PT`)
 
@@ -172,19 +178,17 @@ la data è necessaria perché il numero di chiamata riparte da 1 ogni notte,
 vedi diario 21/08/2026; per gli interventi `<n>` è il numero base, senza il
 suffisso `/N` del sotto-invio: più squadre uscite in momenti diversi sullo
 stesso evento condividono un solo pin), `Fase` (chiamata in attesa /
-intervento in corso), `Stato_operativo` (in attesa / assegnato / sul posto /
-sospeso — non esiste negli XML, è derivato dagli orari; corrisponde al campo
-Oracle `STATUS`, A/P/S, verificato ma non usato per il calcolo — vedi
-checklist sopra). `sospeso` = nessuna squadra più fisicamente presente ma
-l'intervento non è ancora sparito dal file: resta visibile, non viene
-rimosso dalla mappa. `Squadre_mezzi` elenca solo i mezzi attualmente presenti
-(fotografia in tempo reale, non storico). `Posizione_stimata` segnala un pin
-sul centroide del Comune quando l'XML non ha coordinate valide. `Tag`
-estrae `#hashtag`/`@menzioni` dalle note (es. `#autoscala`): siccome
-`interventi.XML` non ha un campo nota proprio, `Note`/`Tag` vengono
-ereditati dalla chiamata d'origine tramite una cache in memoria in
-`sync_interventi.py` (si perde solo se il processo si riavvia nel
-frattempo). `Zona_competenza`/`Area_emergenza` derivano da un layer
+intervento in corso), `Stato_oracle` (campo `STATUS` di Oracle, A/P/S per
+assegnato/sul posto/sospeso, vuoto per le chiamate — unico campo di stato,
+usato direttamente per la vestizione). `sospeso` = nessuna squadra più
+fisicamente presente ma l'intervento non è ancora sparito dal file: resta
+visibile, non viene rimosso dalla mappa. `Squadre_mezzi` elenca solo i mezzi
+attualmente presenti, raggruppati per squadra (fotografia in tempo reale, non
+storico). `Posizione_stimata` segnala un pin sul centroide del Comune quando
+l'XML non ha coordinate valide. `Note`, per gli interventi (che non hanno un
+campo nota proprio nell'XML), viene ereditata dalla chiamata d'origine
+tramite una cache in memoria in `sync_interventi.py` (si perde solo se il
+processo si riavvia nel frattempo). `Zona_competenza`/`Area_emergenza` derivano da un layer
 poligonale facoltativo (`ARCGIS_ZONA_LAYER_URL`, punto-in-poligono, vedi
 `LAYER_INTERVENTI.md`). Dati personali degli XML (`RICHIEDENTE`,
 `TELE_NUMERO`, `NOME`, `COGNOME`, `COGNOME_NOME`) non vengono letti dal

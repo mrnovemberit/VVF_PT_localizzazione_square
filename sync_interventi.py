@@ -182,6 +182,15 @@ def carica_poligoni_zona():
 # ---------------------------------------------------------------------------
 # Riallineamento del layer
 # ---------------------------------------------------------------------------
+def _nome_breve_layer(layer_url):
+    """'Interventi_chiamate2_PT' invece dell'URL intero, solo per i log."""
+    parti = layer_url.rstrip("/").split("/")
+    for i, parte in enumerate(parti):
+        if parte == "FeatureServer" and i > 0:
+            return parti[i - 1]
+    return layer_url
+
+
 def riallinea(layer_url, fase, feature_attese):
     """
     Porta il layer a coincidere con le feature lette dall'XML, limitatamente
@@ -190,30 +199,39 @@ def riallinea(layer_url, fase, feature_attese):
     Il riallineamento è per fase e non globale: i due XML sono file distinti e
     possono essere rigenerati in momenti diversi, quindi elaborando le chiamate
     non si devono toccare le feature degli interventi (e viceversa).
+
+    Non modifica gli oggetti in feature_attese (costruisce copie con
+    l'OBJECTID per gli aggiornamenti): la stessa lista viene passata a più
+    layer in sequenza quando sono configurati più target (vedi elabora()), e
+    l'OBJECTID di un layer non deve sporcare quello di un altro.
     """
     from arcgis_client import query_features, apply_edits
 
+    nome = _nome_breve_layer(layer_url)
     presenti = query_features(
         layer_url,
         where="Fase='{}'".format(fase),
         out_fields="OBJECTID,Chiave",
     )
 
-    # Guardia anti-svuotamento: un file troncato o momentaneamente vuoto non
-    # deve poter cancellare la mappa. Serve una seconda lettura vuota di
-    # seguito prima di credere che davvero non ci sia più nulla.
+    # Guardia anti-svuotamento (per layer + fase: due layer diversi non
+    # devono condividere lo stesso conteggio): un file troncato o
+    # momentaneamente vuoto non deve poter cancellare la mappa. Serve una
+    # seconda lettura vuota di seguito prima di credere che non ci sia più
+    # nulla.
+    chiave_guardia = (layer_url, fase)
     if not feature_attese and presenti:
-        _stato["vuoti_consecutivi"][fase] = _stato["vuoti_consecutivi"].get(fase, 0) + 1
-        if _stato["vuoti_consecutivi"][fase] < 2:
+        _stato["vuoti_consecutivi"][chiave_guardia] = _stato["vuoti_consecutivi"].get(chiave_guardia, 0) + 1
+        if _stato["vuoti_consecutivi"][chiave_guardia] < 2:
             log.warning(
-                "%s: l'XML non contiene nulla ma sul layer ci sono %s feature. "
+                "%s (%s): l'XML non contiene nulla ma sul layer ci sono %s feature. "
                 "Non cancello, attendo conferma al prossimo ciclo.",
-                fase, len(presenti),
+                fase, nome, len(presenti),
             )
             return
-        log.warning("%s: seconda lettura vuota consecutiva, procedo con la pulizia", fase)
+        log.warning("%s (%s): seconda lettura vuota consecutiva, procedo con la pulizia", fase, nome)
     else:
-        _stato["vuoti_consecutivi"][fase] = 0
+        _stato["vuoti_consecutivi"][chiave_guardia] = 0
 
     # Chiave -> OBJECTID. Un eventuale duplicato sulla stessa chiave (non
     # dovrebbe accadere) viene rimosso tenendo la prima occorrenza.
@@ -227,7 +245,7 @@ def riallinea(layer_url, fase, feature_attese):
             per_chiave[chiave] = attributi["OBJECTID"]
 
     if doppioni:
-        log.warning("%s: trovate %s feature duplicate, le rimuovo", fase, len(doppioni))
+        log.warning("%s (%s): trovate %s feature duplicate, le rimuovo", fase, nome, len(doppioni))
 
     da_aggiungere, da_aggiornare = [], []
     chiavi_nel_file = set()
@@ -236,8 +254,10 @@ def riallinea(layer_url, fase, feature_attese):
         chiave = feature["attributes"]["Chiave"]
         chiavi_nel_file.add(chiave)
         if chiave in per_chiave:
-            feature["attributes"]["OBJECTID"] = per_chiave[chiave]
-            da_aggiornare.append(feature)
+            da_aggiornare.append({
+                "attributes": dict(feature["attributes"], OBJECTID=per_chiave[chiave]),
+                "geometry": feature["geometry"],
+            })
         else:
             da_aggiungere.append(feature)
 
@@ -246,7 +266,7 @@ def riallinea(layer_url, fase, feature_attese):
     ]
 
     if not (da_aggiungere or da_aggiornare or da_cancellare):
-        log.info("%s: nessuna differenza da applicare", fase)
+        log.info("%s (%s): nessuna differenza da applicare", fase, nome)
         return
 
     apply_edits(
@@ -256,21 +276,28 @@ def riallinea(layer_url, fase, feature_attese):
         deletes=da_cancellare or None,
     )
     log.info(
-        "%s: %s nuovi, %s aggiornati, %s rimossi",
-        fase, len(da_aggiungere), len(da_aggiornare), len(da_cancellare),
+        "%s (%s): %s nuovi, %s aggiornati, %s rimossi",
+        fase, nome, len(da_aggiungere), len(da_aggiornare), len(da_cancellare),
     )
 
 
 # ---------------------------------------------------------------------------
 # Ciclo
 # ---------------------------------------------------------------------------
-def elabora(cartella, layer_url, forza=False, dry_run=False):
+def elabora(cartella, layer_urls, forza=False, dry_run=False):
     """
     Elabora i due XML, saltando quelli non cambiati dall'ultimo giro.
 
     Un file assente non comporta mai cancellazioni: se il software Oracle non
     lo ha (ancora) scritto, la fase corrispondente resta com'è sul layer.
+
+    layer_urls: un URL singolo, o una lista di URL per scrivere le stesse
+    feature su più layer (es. produzione + un layer sperimentale in
+    parallelo, per confrontarli senza interrompere l'uno o l'altro).
     """
+    if isinstance(layer_urls, str):
+        layer_urls = [layer_urls]
+
     if not dry_run:
         # Il --dry-run non deve toccare la rete per nessun motivo (si usa
         # anche prima di aver configurato le credenziali): niente zone lì.
@@ -292,7 +319,21 @@ def elabora(cartella, layer_url, forza=False, dry_run=False):
             continue
 
         impronta = impronta_file(percorso)
-        if not forza and impronta is not None and _stato["hash"].get(percorso) == impronta:
+        saltabile = (
+            not forza
+            and impronta is not None
+            and _stato["hash"].get(percorso) == impronta
+            # Un file rimasto stabilmente vuoto ha byte identici da un ciclo
+            # all'altro: senza questa eccezione la guardia anti-svuotamento
+            # (che ha bisogno di rileggere una seconda volta per confermare)
+            # non riceverebbe mai quella seconda lettura, e resterebbe in
+            # attesa per sempre invece di pulire un file genuinamente vuoto.
+            and not any(
+                _stato["vuoti_consecutivi"].get((url, fase), 0) > 0
+                for url in layer_urls
+            )
+        )
+        if saltabile:
             continue  # file immutato, niente da fare
 
         feature = leggi_con_retry(lettore, percorso)
@@ -309,10 +350,13 @@ def elabora(cartella, layer_url, forza=False, dry_run=False):
         if dry_run:
             print(json.dumps(feature, ensure_ascii=False, indent=1))
         else:
-            riallinea(layer_url, fase, feature)
+            for layer_url in layer_urls:
+                riallinea(layer_url, fase, feature)
 
-        # L'impronta si registra solo dopo un'elaborazione andata a buon fine,
-        # così un errore di rete fa riprovare al ciclo successivo.
+        # L'impronta si registra solo dopo che TUTTI i layer sono stati
+        # riallineati con successo: se uno fallisce, un'eccezione interrompe
+        # il ciclo prima di questa riga, e si riprova al giro successivo su
+        # entrambi (il layer già aggiornato risulterà solo "senza differenze").
         _stato["hash"][percorso] = impronta
 
 
@@ -364,8 +408,16 @@ def main():
     if not args.dry_run and not layer_url:
         parser.error("Manca la variabile d'ambiente ARCGIS_INTERVENTI_LAYER_URL")
 
+    # Layer aggiuntivi facoltativi (es. produzione + un layer sperimentale in
+    # parallelo), separati da virgola: le stesse feature vengono scritte su
+    # tutti, ognuno riallineato indipendentemente.
+    extra = os.environ.get("ARCGIS_INTERVENTI_LAYER_URL_EXTRA", "")
+    layer_urls = [layer_url] + [u.strip().rstrip("/") for u in extra.split(",") if u.strip()]
+    if len(layer_urls) > 1:
+        log.info("Scrittura su %s layer: %s", len(layer_urls), ", ".join(layer_urls))
+
     if args.dry_run or args.once:
-        elabora(cartella, layer_url, forza=True, dry_run=args.dry_run)
+        elabora(cartella, layer_urls, forza=True, dry_run=args.dry_run)
         return
 
     percorso_log = configura_log_su_file()
@@ -373,7 +425,7 @@ def main():
              cartella, args.intervallo, percorso_log)
     while True:
         try:
-            elabora(cartella, layer_url)
+            elabora(cartella, layer_urls)
         except Exception:
             # Un errore di rete o un timeout non devono fermare il servizio:
             # si logga e si riprova al giro dopo.

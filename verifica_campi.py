@@ -5,8 +5,8 @@ lanciare il sincronizzatore per davvero.
 Verifica tre cose che, se sbagliate, non danno errore ma fanno perdere ore:
 
 1. che tutti i campi esistano con il nome esatto — ArcGIS scarta in silenzio
-   gli attributi che non trovano un campo corrispondente, quindi un
-   "Stato_Operativo" con la O maiuscola non protesta, resta solo sempre vuoto;
+   gli attributi che non trovano un campo corrispondente, quindi uno
+   "Stato_Oracle" con la O maiuscola non protesta, resta solo sempre vuoto;
 2. che i tipi siano quelli giusti e le stringhe abbastanza lunghe;
 3. che la modifica sia abilitata, altrimenti applyEdits verrà respinto.
 
@@ -38,13 +38,11 @@ CAMPI_ATTESI = {
     "Ora_partenza_luogo": (("esriFieldTypeDate",), None),
     "Ora_rientro": (("esriFieldTypeDate",), None),
     "Stato_oracle": (("esriFieldTypeString",), 10),
-    "Stato_operativo": (("esriFieldTypeString",), 30),
     "Squadre_mezzi": (("esriFieldTypeString",), 500),
     "Num_mezzi": (("esriFieldTypeInteger", "esriFieldTypeSmallInteger"), None),
     "Enti_intervenuti": (("esriFieldTypeString",), 10),
     "Priorita": (("esriFieldTypeInteger", "esriFieldTypeSmallInteger"), None),
     "Note": (("esriFieldTypeString",), 1000),
-    "Tag": (("esriFieldTypeString",), 255),
     "Zona_competenza": (("esriFieldTypeString",), 50),
     "Area_emergenza": (("esriFieldTypeString",), 10),
     "Minuti_apertura": (("esriFieldTypeInteger", "esriFieldTypeSmallInteger"), None),

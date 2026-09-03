@@ -13,23 +13,35 @@ REPO = os.path.dirname(os.path.abspath(__file__))
 ESEMPI = os.path.join(REPO, "esempi")
 sys.path.insert(0, REPO)
 
-# --- finto ArcGIS: un dizionario OBJECTID -> attributi -----------------------
-LAYER = {}
-_prossimo_oid = [1]
+# --- finto ArcGIS: un dizionario per layer_url, ognuno OBJECTID -> attributi -
+# Consapevole del layer_url (a differenza di un singolo store globale) per
+# poter testare la scrittura in parallelo su più layer senza che l'uno
+# interferisca con l'altro.
+LAYERS = {}
+_prossimo_oid = {}
+
+def _store(layer_url):
+    return LAYERS.setdefault(layer_url, {})
 
 def query_features(layer_url, where, out_fields):
     fase = where.split("'")[1]
-    return [dict(a, OBJECTID=oid) for oid, a in LAYER.items() if a["Fase"] == fase]
+    return [dict(a, OBJECTID=oid) for oid, a in _store(layer_url).items() if a["Fase"] == fase]
 
 def apply_edits(layer_url, adds=None, updates=None, deletes=None):
+    store = _store(layer_url)
+    prossimo = _prossimo_oid.get(layer_url, 1)
     for f in adds or []:
-        LAYER[_prossimo_oid[0]] = dict(f["attributes"])
-        _prossimo_oid[0] += 1
+        store[prossimo] = dict(f["attributes"])
+        prossimo += 1
     for f in updates or []:
-        LAYER[f["attributes"]["OBJECTID"]] = dict(f["attributes"])
+        store[f["attributes"]["OBJECTID"]] = dict(f["attributes"])
     for oid in deletes or []:
-        LAYER.pop(oid, None)
+        store.pop(oid, None)
+    _prossimo_oid[layer_url] = prossimo
     return {"ok": True}
+
+# Il layer usato da tutti i test 1-10 (single-layer, invariati)
+LAYER = _store("http://finto")
 
 finto = types.ModuleType("arcgis_client")
 finto.query_features = query_features
@@ -93,12 +105,13 @@ controlla("l'intervento sparito dall'XML viene rimosso dal layer",
 print("\n--- 3. Tutte le squadre abbandonano il luogo: l'intervento diventa sospeso, non sparisce ---")
 testo = open(INTERVENTI, encoding="iso-8859-1").read()
 testo = testo.replace('<ORA_PARTENZA_LUOGO NULL="TRUE"/>', "<ORA_PARTENZA_LUOGO>18:40</ORA_PARTENZA_LUOGO>")
+testo = testo.replace("<STATUS>P</STATUS>", "<STATUS>S</STATUS>")
 open(INTERVENTI, "w", encoding="iso-8859-1").write(testo)
 sync.elabora(CARTELLA, "http://finto")
 controlla("nessuna squadra più presente, ma l'intervento resta sul layer",
           [f"C-14-{DATA}", f"I-3109-{DATA}"])
-controlla_attributo("Stato_operativo diventa 'sospeso'",
-                     f"I-3109-{DATA}", "Stato_operativo", "sospeso")
+controlla_attributo("Stato_oracle segnala 'S' (sospeso)",
+                     f"I-3109-{DATA}", "Stato_oracle", "S")
 controlla_attributo("Squadre_mezzi si svuota: nessuno è più presente",
                      f"I-3109-{DATA}", "Squadre_mezzi", None)
 
@@ -157,7 +170,7 @@ open(XML_9, "w", encoding="iso-8859-1").write("""<?xml version = '1.0' encoding 
   <TIPOLOGIA>Prova</TIPOLOGIA>
   <COMUNE>Pistoia</COMUNE>
   <SIGLA_PROVINCIA>PT</SIGLA_PROVINCIA>
-  <STATUS>A</STATUS>
+  <STATUS>P</STATUS>
   <ENTI_INTERVENUTI>N</ENTI_INTERVENUTI>
   <INDIRIZZO>Via Prova</INDIRIZZO>
   <CIV_KM NULL="TRUE"/>
@@ -201,8 +214,8 @@ else:
     problemi = []
     if a["Chiave"] != "I-9001-19082026":
         problemi.append(f"Chiave errata: {a['Chiave']}")
-    if a["Stato_operativo"] != "sul posto":
-        problemi.append(f"Stato_operativo errato: {a['Stato_operativo']} (atteso 'sul posto', vince /1 ancora presente)")
+    if a["Stato_oracle"] != "P":
+        problemi.append(f"Stato_oracle errato: {a['Stato_oracle']!r} (atteso 'P', dalla riga /1 ancora presente)")
     if a["Squadre_mezzi"] != "MEZZO UNO":
         problemi.append(f"Squadre_mezzi dovrebbe contenere solo chi è ancora presente: {a['Squadre_mezzi']}")
     if a["Posizione_stimata"] is not None:
@@ -215,7 +228,7 @@ else:
 
 shutil.rmtree(CARTELLA_9, ignore_errors=True)
 
-print("\n--- 10. Il tag scritto nella nota di una chiamata si ritrova sull'intervento corrispondente ---")
+print("\n--- 10. La nota di una chiamata si ritrova sull'intervento corrispondente ---")
 open(CHIAMATE, "w", encoding="iso-8859-1").write("""<?xml version = '1.0' encoding = 'iso-8859-1'?>
 <ROWSET>
  <chiamata num="500">
@@ -239,11 +252,11 @@ open(CHIAMATE, "w", encoding="iso-8859-1").write("""<?xml version = '1.0' encodi
  </chiamata>
 </ROWSET>""")
 sync.elabora(CARTELLA, "http://finto", forza=True)
-controlla_attributo("il tag compare sulla chiamata stessa",
-                     f"C-500-{DATA}", "Tag", "autoscala")
+controlla_attributo("la nota compare sulla chiamata stessa",
+                     f"C-500-{DATA}", "Note", "tetto pericolante, serve #autoscala")
 
 # La stessa chiamata diventa un intervento (stesso DATA_CHIAMATA/ORA_CHIAMATA/
-# COMUNE): interventi.XML non ha un campo nota, ma il sincronizzatore se la
+# INDIRIZZO): interventi.XML non ha un campo nota, ma il sincronizzatore se la
 # ricorda da quando era ancora una chiamata (vedi aggiorna_note_cache).
 open(INTERVENTI, "w", encoding="iso-8859-1").write("""<?xml version = '1.0' encoding = 'iso-8859-1'?>
 <ROWSET>
@@ -272,9 +285,7 @@ open(INTERVENTI, "w", encoding="iso-8859-1").write("""<?xml version = '1.0' enco
  </intervento>
 </ROWSET>""")
 sync.elabora(CARTELLA, "http://finto", forza=True)
-controlla_attributo("il tag si ritrova sull'intervento",
-                     f"I-9500-{DATA}", "Tag", "autoscala")
-controlla_attributo("anche la nota originale viene ereditata",
+controlla_attributo("la nota viene ereditata dall'intervento",
                      f"I-9500-{DATA}", "Note", "tetto pericolante, serve #autoscala")
 
 shutil.rmtree(CARTELLA, ignore_errors=True)
@@ -317,6 +328,103 @@ if problemi_zona:
     globals()["FALLIMENTI"] = globals().get("FALLIMENTI", 0) + 1
 else:
     print("[OK ] punto in poligono e sigle radio (incluse due zone sulla stessa sigla) corrette")
+
+print("\n--- 12. Stesse feature scritte su due layer in parallelo, senza interferenze ---")
+CARTELLA_12 = tempfile.mkdtemp(prefix="xml_prova12_")
+CHIAMATE_12 = os.path.join(CARTELLA_12, "chiamate_interventi.XML")
+INTERVENTI_12 = os.path.join(CARTELLA_12, "interventi.XML")
+open(CHIAMATE_12, "w", encoding="iso-8859-1").write("""<?xml version = '1.0' encoding = 'iso-8859-1'?>
+<ROWSET>
+ <chiamata num="700">
+  <CHIAMATA>700</CHIAMATA>
+  <LOC_IND>Via Doppia</LOC_IND>
+  <CIV_KM NULL="TRUE"/>
+  <COMUNE>Pistoia</COMUNE>
+  <COORD_X>10,9</COORD_X>
+  <COORD_Y>43,9</COORD_Y>
+  <SIGLA_PROVINCIA>PT</SIGLA_PROVINCIA>
+  <COD_TIPOLOGIA>1</COD_TIPOLOGIA>
+  <DETTAGLIO_TIPOLOGIA NULL="TRUE"/>
+  <NOTE_INTERVENTO NULL="TRUE"/>
+  <DATA_CHIAMATA>19/08/2026</DATA_CHIAMATA>
+  <ORA_CHIAMATA>15:00</ORA_CHIAMATA>
+  <RICHIEDENTE>x</RICHIEDENTE>
+  <TELE_NUMERO NULL="TRUE"/>
+  <NOME>X</NOME>
+  <COGNOME>Y</COGNOME>
+  <PRIORITA>0</PRIORITA>
+ </chiamata>
+</ROWSET>""")
+open(INTERVENTI_12, "w", encoding="iso-8859-1").write(
+    "<?xml version = '1.0' encoding = 'iso-8859-1'?>\n<ROWSET>\n</ROWSET>")
+
+sync.elabora(CARTELLA_12, ["http://layerA", "http://layerB"], forza=True)
+
+problemi_multi = []
+attesa = ["C-700-19082026"]
+chiavi_a = sorted(a["Chiave"] for a in LAYERS["http://layerA"].values())
+chiavi_b = sorted(a["Chiave"] for a in LAYERS["http://layerB"].values())
+if chiavi_a != attesa:
+    problemi_multi.append(f"layer A ha {chiavi_a}, atteso {attesa}")
+if chiavi_b != attesa:
+    problemi_multi.append(f"layer B ha {chiavi_b}, atteso {attesa}")
+
+# Un secondo giro sullo stesso file (forzato) non deve duplicare la feature
+# né far leakare l'OBJECTID di un layer nell'altro (il bug che si sarebbe
+# preso se riallinea() avesse modificato in-place gli oggetti condivisi).
+sync.elabora(CARTELLA_12, ["http://layerA", "http://layerB"], forza=True)
+if len(LAYERS["http://layerA"]) != 1:
+    problemi_multi.append(f"layer A ha {len(LAYERS['http://layerA'])} feature dopo un secondo giro, atteso 1")
+if len(LAYERS["http://layerB"]) != 1:
+    problemi_multi.append(f"layer B ha {len(LAYERS['http://layerB'])} feature dopo un secondo giro, atteso 1")
+
+if problemi_multi:
+    print("[FALLITO] " + "; ".join(problemi_multi))
+    globals()["FALLIMENTI"] = globals().get("FALLIMENTI", 0) + 1
+else:
+    print("[OK ] entrambi i layer ricevono le stesse feature, nessuna interferenza fra gli OBJECTID")
+
+shutil.rmtree(CARTELLA_12, ignore_errors=True)
+
+print("\n--- 13. File rimasto stabilmente vuoto (senza --forza): la guardia deve comunque pulire al secondo giro ---")
+# Riproduce esattamente il ciclo continuo (main() non passa mai forza=True):
+# un file che resta byte-per-byte identico fra un ciclo e l'altro non deve
+# impedire alla guardia anti-svuotamento di fare la sua seconda lettura.
+CARTELLA_13 = tempfile.mkdtemp(prefix="xml_prova13_")
+CHIAMATE_13 = os.path.join(CARTELLA_13, "chiamate_interventi.XML")
+INTERVENTI_13 = os.path.join(CARTELLA_13, "interventi.XML")
+shutil.copy(os.path.join(ESEMPI, "chiamate_interventi.XML"), CHIAMATE_13)
+open(INTERVENTI_13, "w", encoding="iso-8859-1").write(
+    "<?xml version = '1.0' encoding = 'iso-8859-1'?>\n<ROWSET>\n</ROWSET>")
+
+sync.elabora(CARTELLA_13, "http://layerC")  # primo giro: popola (mai forzato, file mai visto prima)
+prima = len(LAYERS["http://layerC"])
+
+open(CHIAMATE_13, "w", encoding="iso-8859-1").write(
+    "<?xml version = '1.0' encoding = 'iso-8859-1'?>\n<ROWSET>\n</ROWSET>")
+sync.elabora(CARTELLA_13, "http://layerC")  # prima lettura vuota: non deve pulire ancora
+dopo_prima_vuota = len(LAYERS["http://layerC"])
+
+# Secondo giro SENZA toccare il file: stessi byte di prima. È esattamente lo
+# scenario del ciclo continuo in produzione (main() non passa mai forza).
+sync.elabora(CARTELLA_13, "http://layerC")
+dopo_seconda_vuota = len(LAYERS["http://layerC"])
+
+problemi_13 = []
+if prima == 0:
+    problemi_13.append("il primo giro non ha popolato nulla, test non significativo")
+if dopo_prima_vuota != prima:
+    problemi_13.append(f"la prima lettura vuota ha già modificato il layer ({prima} -> {dopo_prima_vuota}), doveva aspettare")
+if dopo_seconda_vuota != 0:
+    problemi_13.append(f"dopo la seconda lettura vuota (file invariato, nessun --forza) il layer ha ancora {dopo_seconda_vuota} feature, atteso 0")
+
+if problemi_13:
+    print("[FALLITO] " + "; ".join(problemi_13))
+    globals()["FALLIMENTI"] = globals().get("FALLIMENTI", 0) + 1
+else:
+    print("[OK ] pulito al secondo giro anche senza --forza e senza che il file cambiasse")
+
+shutil.rmtree(CARTELLA_13, ignore_errors=True)
 
 falliti = globals().get("FALLIMENTI", 0)
 print(f"\n=== {'TUTTO OK' if not falliti else str(falliti) + ' PROVE FALLITE'} ===")

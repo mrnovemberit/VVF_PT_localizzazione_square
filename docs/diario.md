@@ -1,5 +1,109 @@
 # Diario di sessione
 
+## 03/09/2026 — Allineamento campi su charlie, file unico per la chiavetta, colore dashboard
+
+Sessione partita dal ripopolare `Interventi_chiamate_PT_charlie_test` con i due
+XML reali portati su chiavetta (`chiamate_interventi_test.XML` /
+`interventi_test.XML`, la stessa notte di allerta meteo 20-21/08 già usata il
+21/08 — confermato byte-per-byte identici a quelli già in `xml_locali/`).
+Layer ripopolato: 57 feature (51 chiamate + 6 interventi). Confermato su dati
+reali: `Stato_operativo`/`Tag`/`Zona_competenza` corretti, sotto-invii
+`3171 /1`+`/2` uniti in un solo pin. **Non confermato con questi dati**:
+nessuno dei 6 interventi aveva Note/Tag ereditati, perché le chiamate
+d'origine erano già state promosse da Oracle prima che lo snapshot finisse
+sulla chiavetta — limite del test statico (serve un ciclo continuo per
+catturare una chiamata ancora in coda), non un bug: il test sintetico 10 di
+`prova_riallineamento.py` (che riproduce esattamente quello scenario)
+passava già prima di oggi.
+
+**Quattro modifiche ai campi**, richieste da Massi dopo aver guardato il
+layer ripopolato:
+
+1. **Tolto `Stato_operativo`** (`parser_xml.py`): era calcolato dagli orari
+   (`ORA_USCITA`/`ORA_ARRIVO`/`ORA_PARTENZA_LUOGO`) ma duplicava
+   `Stato_oracle` (il campo `STATUS` grezzo di Oracle, A/P/S). La funzione
+   interna `stato_operativo()` resta (serve ancora per scegliere la riga
+   "migliore" fra sotto-invii e per il filtro di `Squadre_mezzi`), è solo
+   sparita dall'attributo scritto su ArcGIS. Massi ha cancellato il campo a
+   mano da ArcGIS Online su `_charlie_test` (confermato con
+   `verifica_campi.py`: 29 → 27 campi attesi/presenti).
+2. **`Squadre_mezzi` raggruppato per squadra**: prima
+   `"DELTA 1+APS MAN; DELTA 1+CA BOSCHI_3"` (nome squadra ripetuto), ora
+   raggruppato in modo che la squadra compaia una sola volta.
+3. **Chiave di corrispondenza Note/Tag cambiata da COMUNE a INDIRIZZO**:
+   `_chiave_nota()` usava `DATA_CHIAMATA+ORA_CHIAMATA+COMUNE` (gli unici tre
+   campi con lo stesso nome in entrambi gli XML); ora usa INDIRIZZO al posto
+   di COMUNE (più preciso), tenendo comunque la data per evitare falsi
+   abbinamenti fra notti diverse. Scoperta rilevante nel farlo: il campo
+   indirizzo ha **nomi di tag diversi nei due XML** (`LOC_IND` nelle
+   chiamate, `INDIRIZZO` negli interventi) — non bastava cambiare il nome di
+   un solo campo. Inoltre **~24% delle chiamate reali** (12 su 51 in questo
+   dataset) hanno un suffisso `" (*)"` in `LOC_IND` che non compare mai in
+   `INDIRIZZO` lato intervento (probabile annotazione Oracle su indirizzi
+   corretti/verificati dal dispatcher): la chiave di corrispondenza ora
+   normalizza togliendo quel suffisso, altrimenti quel 24% di chiamate non
+   avrebbe mai trovato corrispondenza da promossa.
+4. **Tabella di decodifica `COD_TIPOLOGIA`** aggiunta in `parser_xml.py`
+   (dizionario fornito da Massi, ~140 voci), sullo stesso pattern già usato
+   per `MAPPA_AREA_EMERGENZA`: le chiamate mostravano "Codice NN", ora la
+   tipologia testuale come già succede per gli interventi.
+
+Tutte e quattro verificate con `prova_riallineamento.py` (13/13 test) e un
+giro reale su `_charlie_test`.
+
+**Produzione**: controllato lo schema di `Interventi_chiamate2_PT` con le
+credenziali già in `.env` — fermo al 21/08, mai allineato al ridisegno di
+quella sessione (mancano `Zona_competenza`/`Area_emergenza`/
+`Posizione_stimata`, c'è ancora `Stato_operativo`). Tentato un
+`addToDefinition`/`deleteFromDefinition` via API per allinearlo: il
+classificatore automatico ha bloccato un primo tentativo di test su un campo
+fittizio direttamente in produzione (giustamente), e il tentativo vero e
+proprio (anche ripetuto su `_charlie_test` per isolare il problema) ha dato
+errore 400 generico ("Cannot perform query. Invalid query parameters.") sia
+in produzione che su charlie — causa non diagnosticata. **Decisione di
+Massi**: lasciare la produzione ferma così com'è, come backup; si lavora solo
+su `.env.charlie` finché non si deciderà di sostituirla. Nessuna modifica
+è stata applicata in produzione (verificato con `verifica_campi.py`: ancora
+27 campi, `Stato_operativo` presente, invariato).
+
+**File unico per la sala operativa**: creato `costruisci_standalone.py`, che
+unisce `arcgis_client.py` + `parser_xml.py` + `sync_interventi.py` in un solo
+`sync_interventi.py` (e adatta `verifica_campi.py` di conseguenza — importava
+`descrivi_layer` da `arcgis_client`, che a quel punto non esiste più come
+file a sé). Genera sempre in una cartella diversa da quella dei sorgenti
+(rifiuta di scrivere nella root del repo, altrimenti sovrascriverebbe i
+moduli). Output verificato **identico** (a parte i timestamp) a un dry-run
+del sync modulare. Copiato su
+`C:\Users\mnera\Desktop\VVF_sync_interventi_per_chiavetta`, che ora ha un
+solo `sync_interventi.py` invece di tre file — testato da lì con un dry-run
+reale, funziona. `dist/` (output di build) aggiunto a `.gitignore`.
+
+**Colorazione righe per stato sulla dashboard ArcGIS**: nell'elemento Elenco,
+la "Formattazione condizionale" (un pannello diverso dal Modello/HTML del
+testo, con un proprio box Arcade che restituisce
+`{textColor, backgroundColor, separatorColor, selectionColor,
+selectionTextColor}`) inizialmente falliva con "Impossibile eseguire lo
+script Arcade" su **qualunque** accesso a `$feature.NomeCampo` (isolato
+provando sia `Stato_oracle` che `Numero`, campo sicuramente valido — stesso
+errore su entrambi). Causa trovata da Massi con un esempio Esri funzionante:
+in questo pannello va usato **`$datapoint`**, non `$feature`. Script finale
+(P verde, A giallo, S arancione):
+```javascript
+var stato = Upper(Text($datapoint["Stato_oracle"]));
+var textColor = "#FFFFFF";
+if (stato == "P") { textColor = "#00CC44"; }
+else if (stato == "A") { textColor = "#FFD500"; }
+else if (stato == "S") { textColor = "#FF8C00"; }
+return { textColor: textColor, backgroundColor: '', separatorColor: '',
+         selectionColor: '#ff00a6', selectionTextColor: '#ff00a6' }
+```
+Confermato funzionante da Massi. Non abbiamo invece trovato un modo di far
+comparire testo condizionale (es. un prefisso "Sosp.") dentro il Modello
+del testo dell'Elenco: quel campo fa solo sostituzione di segnaposto
+(`{field/...}`/`{expression/...}`), non esegue codice — per quello servirebbe
+un'espressione Arcade separata (scheda Dati) richiamata con
+`{expression/nome}`. Abbandonato su richiesta di Massi ("non è importante").
+
 ## 21/08/2026 — Ridisegno stato interventi (sospeso), Tag e Zone di competenza
 
 Sessione lunga partita dall'analisi dei due XML reali di una notte di allerta
