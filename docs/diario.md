@@ -19,18 +19,22 @@ passava già prima di oggi.
 **Quattro modifiche ai campi**, richieste da Massi dopo aver guardato il
 layer ripopolato:
 
-1. **Tolto `Stato_operativo`** (`parser_xml.py`): era calcolato dagli orari
-   (`ORA_USCITA`/`ORA_ARRIVO`/`ORA_PARTENZA_LUOGO`) ma duplicava
-   `Stato_oracle` (il campo `STATUS` grezzo di Oracle, A/P/S). La funzione
-   interna `stato_operativo()` resta (serve ancora per scegliere la riga
-   "migliore" fra sotto-invii e per il filtro di `Squadre_mezzi`), è solo
-   sparita dall'attributo scritto su ArcGIS. Massi ha cancellato il campo a
-   mano da ArcGIS Online su `_charlie_test` (confermato con
-   `verifica_campi.py`: 29 → 27 campi attesi/presenti).
+1. **Tolti `Stato_operativo` e `Tag`** (`parser_xml.py`): `Stato_operativo`
+   era calcolato dagli orari (`ORA_USCITA`/`ORA_ARRIVO`/`ORA_PARTENZA_LUOGO`)
+   ma duplicava `Stato_oracle` (il campo `STATUS` grezzo di Oracle, A/P/S).
+   La funzione interna `stato_operativo()` resta (serve ancora per scegliere
+   la riga "migliore" fra sotto-invii e per il filtro di `Squadre_mezzi`), è
+   solo sparita dall'attributo scritto su ArcGIS. `Tag` è stato tolto insieme
+   (redundante: era solo l'eco degli hashtag già visibili dentro `Note` —
+   `estrai_tag()`/`_TAG_REGEX` rimossi, `note_da_chiamate()` ora traccia solo
+   la nota). Massi ha cancellato entrambi i campi a mano da ArcGIS Online su
+   `_charlie_test` (confermato con `verifica_campi.py`: 29 → 27 campi
+   attesi/presenti).
 2. **`Squadre_mezzi` raggruppato per squadra**: prima
    `"DELTA 1+APS MAN; DELTA 1+CA BOSCHI_3"` (nome squadra ripetuto), ora
    raggruppato in modo che la squadra compaia una sola volta.
-3. **Chiave di corrispondenza Note/Tag cambiata da COMUNE a INDIRIZZO**:
+3. **Chiave di corrispondenza per l'eredità di `Note` cambiata da COMUNE a
+   INDIRIZZO**:
    `_chiave_nota()` usava `DATA_CHIAMATA+ORA_CHIAMATA+COMUNE` (gli unici tre
    campi con lo stesso nome in entrambi gli XML); ora usa INDIRIZZO al posto
    di COMUNE (più preciso), tenendo comunque la data per evitare falsi

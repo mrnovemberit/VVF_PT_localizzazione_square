@@ -98,9 +98,9 @@ produzione (`Interventi_chiamate2_PT`) resta ferma al 21/08/2026 come backup.
 
 ### Completato
 
-- **Campi allineati su `_charlie_test`** il 03/09/2026: tolto
-  `Stato_operativo`, `Squadre_mezzi` per squadra, chiave Note su indirizzo,
-  tabella `COD_TIPOLOGIA`. Dettagli nel diario.
+- **Campi allineati su `_charlie_test`** il 03/09/2026: tolti
+  `Stato_operativo` e `Tag` (ridondanti), `Squadre_mezzi` per squadra,
+  chiave Note su indirizzo, tabella `COD_TIPOLOGIA`. Dettagli nel diario.
 - **File unico per la chiavetta e colore righe dashboard per stato** il
   03/09/2026: `costruisci_standalone.py` (nuovo). Dettagli nel diario.
 - **Ridisegno stato interventi (sospeso), Tag e Zona_competenza** il
