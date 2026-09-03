@@ -155,6 +155,37 @@ committato):
   comandi eseguiti lo nominava esplicitamente. Segnalato a Massi, ancora da
   chiarire.
 
+**Interventi di mutuo soccorso fuori provincia scomparivano dalla mappa**,
+scoperto da Massi durante un test: `COMUNE_CENTROIDI` copre solo i ~20 comuni
+della provincia di Pistoia, quindi un intervento fuori provincia senza
+`COORD_X`/`COORD_Y` non trovava il comune e veniva scartato del tutto invece
+di comparire con un centroide stimato — stesso meccanismo di fallback già
+esistente, semplicemente troppo corto. Corretto in `parser_xml.py`:
+
+- Aggiunto un dataset nazionale ISTAT (7904 comuni, comune+provincia →
+  centroide WGS84; fonte
+  [opendatasicilia/comuni-italiani](https://github.com/opendatasicilia/comuni-italiani),
+  compattato come testo pipe-delimited in fondo al file, non come dizionario,
+  per restare leggibile — usato come **secondo livello** di fallback, dopo
+  `COMUNE_CENTROIDI` che resta il primo e invariato per non rischiare di
+  sovrascrivere coordinate già validate sui comuni di Pistoia). Usa
+  `SIGLA_PROVINCIA` dall'XML per evitare ambiguità fra comuni omonimi in
+  province diverse (cerca comune+provincia, poi solo il nome come ultima
+  risorsa).
+- **Terzo livello, ultima spiaggia**: se anche il dataset nazionale non
+  trova nulla (nome scritto male, comune non riconoscibile — es. il caso
+  reale già visto il 21/08, `"zoobivio montagnanatorbecchia (*)"`), il pin
+  finisce sul **comando di Pistoia** invece di sparire, sempre con
+  `Posizione_stimata="Sì"`.
+- Nuovo test 14 in `prova_riallineamento.py` (ora 14/14 verdi): Firenze fuori
+  provincia trova il centroide vero, un comune inventato finisce sul comando
+  di Pistoia.
+- Rigenerati e riverificati sia `dist/sync_interventi.py` (file unico) sia
+  `sync_interventi.exe` con questo parser molto più grande (+7904 righe di
+  dati, `parser_xml.py` passa da 848 a 8812 righe): sintassi ok, dry-run
+  reale invariato sui dati di Pistoia (nessuna regressione), exe ricompilato
+  e ricopiato sulla chiavetta (12,5 MB, +100 KB circa per i dati aggiunti).
+
 ## 21/08/2026 — Ridisegno stato interventi (sospeso), Tag e Zone di competenza
 
 Sessione lunga partita dall'analisi dei due XML reali di una notte di allerta

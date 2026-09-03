@@ -103,6 +103,10 @@ produzione (`Interventi_chiamate2_PT`) resta ferma al 21/08/2026 come backup.
 
 ### Completato
 
+- **Interventi fuori provincia non più scartati** il 03/09/2026: dataset
+  nazionale ISTAT (7904 comuni) come fallback quando manca il comune di
+  Pistoia; ultima spiaggia sul comando di Pistoia se il comune non si
+  riconosce proprio. Dettagli nel diario.
 - **Campi allineati su `_charlie_test`** il 03/09/2026: tolti
   `Stato_operativo` e `Tag` (ridondanti), `Squadre_mezzi` per squadra,
   chiave Note su indirizzo, tabella `COD_TIPOLOGIA`. Dettagli nel diario.

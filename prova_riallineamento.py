@@ -426,6 +426,64 @@ else:
 
 shutil.rmtree(CARTELLA_13, ignore_errors=True)
 
+print("\n--- 14. Mutuo soccorso fuori provincia senza coordinate: centroide del comune vero, non scartato ---")
+CARTELLA_14 = tempfile.mkdtemp(prefix="xml_prova14_")
+CHIAMATE_14 = os.path.join(CARTELLA_14, "chiamate_interventi.XML")
+INTERVENTI_14 = os.path.join(CARTELLA_14, "interventi.XML")
+open(CHIAMATE_14, "w", encoding="iso-8859-1").write("""<?xml version = '1.0' encoding = 'iso-8859-1'?>
+<ROWSET>
+ <chiamata num="600">
+  <CHIAMATA>600</CHIAMATA>
+  <LOC_IND>Via Fuori Provincia</LOC_IND>
+  <CIV_KM NULL="TRUE"/>
+  <COMUNE>Firenze</COMUNE>
+  <COORD_X NULL="TRUE"/>
+  <COORD_Y NULL="TRUE"/>
+  <SIGLA_PROVINCIA>FI</SIGLA_PROVINCIA>
+  <COD_TIPOLOGIA>1</COD_TIPOLOGIA>
+  <DETTAGLIO_TIPOLOGIA NULL="TRUE"/>
+  <NOTE_INTERVENTO NULL="TRUE"/>
+  <DATA_CHIAMATA>19/08/2026</DATA_CHIAMATA>
+  <ORA_CHIAMATA>10:00</ORA_CHIAMATA>
+  <RICHIEDENTE>x</RICHIEDENTE>
+  <TELE_NUMERO NULL="TRUE"/>
+  <NOME>X</NOME>
+  <COGNOME>Y</COGNOME>
+  <PRIORITA>0</PRIORITA>
+ </chiamata>
+ <chiamata num="601">
+  <CHIAMATA>601</CHIAMATA>
+  <LOC_IND>Via Comune Inventato</LOC_IND>
+  <CIV_KM NULL="TRUE"/>
+  <COMUNE>Zzznonesiste</COMUNE>
+  <COORD_X NULL="TRUE"/>
+  <COORD_Y NULL="TRUE"/>
+  <SIGLA_PROVINCIA>XX</SIGLA_PROVINCIA>
+  <COD_TIPOLOGIA>1</COD_TIPOLOGIA>
+  <DETTAGLIO_TIPOLOGIA NULL="TRUE"/>
+  <NOTE_INTERVENTO NULL="TRUE"/>
+  <DATA_CHIAMATA>19/08/2026</DATA_CHIAMATA>
+  <ORA_CHIAMATA>10:05</ORA_CHIAMATA>
+  <RICHIEDENTE>x</RICHIEDENTE>
+  <TELE_NUMERO NULL="TRUE"/>
+  <NOME>X</NOME>
+  <COGNOME>Y</COGNOME>
+  <PRIORITA>0</PRIORITA>
+ </chiamata>
+</ROWSET>""")
+open(INTERVENTI_14, "w", encoding="iso-8859-1").write(
+    "<?xml version = '1.0' encoding = 'iso-8859-1'?>\n<ROWSET>\n</ROWSET>")
+
+sync.elabora(CARTELLA_14, "http://finto", forza=True)
+controlla_attributo("Firenze (fuori provincia): centroide del comune vero, non quello di Pistoia",
+                     f"C-600-{DATA}", "Latitudine", 43.769871)
+controlla_attributo("Firenze (fuori provincia): segnalato come stimato",
+                     f"C-600-{DATA}", "Posizione_stimata", "Sì")
+controlla_attributo("Comune inventato: ultimo fallback sul comando di Pistoia, non scartato",
+                     f"C-601-{DATA}", "Latitudine", 43.9333)
+
+shutil.rmtree(CARTELLA_14, ignore_errors=True)
+
 falliti = globals().get("FALLIMENTI", 0)
 print(f"\n=== {'TUTTO OK' if not falliti else str(falliti) + ' PROVE FALLITE'} ===")
 sys.exit(1 if falliti else 0)
