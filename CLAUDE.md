@@ -59,7 +59,11 @@ indipendenti e complementari:
   (rete: token, query, applyEdits, descrivi_layer), `verifica_campi.py`
   (controlla i campi del layer prima di scriverci). `costruisci_standalone.py`
   genera, a partire da questi, un `sync_interventi.py` unico (+ `verifica_campi.py`
-  adattato) per installare un solo file invece di tre, es. sulla chiavetta.
+  adattato). `costruisci_exe.py` va oltre: incorpora le credenziali di
+  `.env.charlie` e compila con PyInstaller un `sync_interventi.exe`
+  autosufficiente (nessun `.env`, nessuna installazione Python sul PC di
+  destinazione) — è quello che si installa davvero in sala operativa, vedi
+  **Decisioni prese**.
 - Vedi **`LAYER_INTERVENTI.md`** per la creazione del layer, l'elenco
   completo dei campi da creare a mano, la configurazione e l'installazione
   sul PC del comando.
@@ -87,8 +91,9 @@ indipendenti e complementari:
 Sviluppo attivo solo su `.env.charlie` (vedi **Decisioni prese**); la
 produzione (`Interventi_chiamate2_PT`) resta ferma al 21/08/2026 come backup.
 
-- [ ] Riavviare il PC di sala operativa per confermare che l'Attività
-      pianificata riparte da sola senza intervento manuale
+- [ ] Installare `sync_interventi.exe` sul PC di sala operativa (nella
+      cartella degli XML) e verificare che l'Attività pianificata lo
+      rilanci da sola dopo un riavvio
 - [ ] Testare in condizioni reali (non sintetiche, su un ciclo continuo) il
       passaggio di `Note` da una chiamata vera al suo intervento quando
       Oracle la promuove nel corso della notte
@@ -101,8 +106,9 @@ produzione (`Interventi_chiamate2_PT`) resta ferma al 21/08/2026 come backup.
 - **Campi allineati su `_charlie_test`** il 03/09/2026: tolti
   `Stato_operativo` e `Tag` (ridondanti), `Squadre_mezzi` per squadra,
   chiave Note su indirizzo, tabella `COD_TIPOLOGIA`. Dettagli nel diario.
-- **File unico per la chiavetta e colore righe dashboard per stato** il
-  03/09/2026: `costruisci_standalone.py` (nuovo). Dettagli nel diario.
+- **`sync_interventi.exe` autosufficiente e colore righe dashboard per
+  stato** il 03/09/2026: `costruisci_exe.py` (nuovo), testato end-to-end
+  (dry-run + ciclo vero + log nella cartella giusta). Dettagli nel diario.
 - **Ridisegno stato interventi (sospeso), Tag e Zona_competenza** il
   21/08/2026: sui dati reali di una notte di allerta meteo, risolti due bug
   (sotto-invii `/1`/`/2` duplicavano il pin, coordinate mancanti facevano
@@ -150,6 +156,13 @@ produzione (`Interventi_chiamate2_PT`) resta ferma al 21/08/2026 come backup.
   produzione (ancora al 21/08), si è scelto di lasciarla ferma com'è finché
   non si deciderà di sostituirla — meno rischio sul sistema che la sala
   operativa usa davvero ogni notte.
+- **Un `.exe` unico invece di script + `.env` + venv** (03/09/2026): sul PC
+  di sala operativa serve la minima frizione possibile — un solo file da
+  copiare nella cartella degli XML, senza installazione Python né
+  configurazione. Le credenziali sono incorporate nell'eseguibile (lette da
+  `.env.charlie` solo in fase di build, mai committate) — compromesso
+  accettato perché è un token di scrittura su un solo layer, non una
+  credenziale utente, e la macchina è fisicamente controllata.
 
 ## Campi Feature Layer 1 (`Posizione_partenze_PT`)
 

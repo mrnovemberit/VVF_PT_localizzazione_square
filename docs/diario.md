@@ -108,6 +108,53 @@ del testo dell'Elenco: quel campo fa solo sostituzione di segnaposto
 un'espressione Arcade separata (scheda Dati) richiamata con
 `{expression/nome}`. Abbandonato su richiesta di Massi ("non è importante").
 
+**Ripensato il file unico per la chiavetta: da script Python a `.exe`
+autosufficiente.** Dopo aver preparato la cartella con `sync_interventi.py`
+unico + `.env` da compilare a mano, Massi ha chiesto qualcosa di ancora più
+semplice: un solo `.exe` da installare direttamente nella cartella degli XML
+sul PC di sala operativa, senza `.env`, senza `pip install`, che si rilanci
+da solo al riavvio. Creato **`costruisci_exe.py`** (nuovo, committato — non
+contiene segreti, li legge da `.env.charlie` in fase di build, che resta mai
+committato):
+
+- Riusa `costruisci_sync()` di `costruisci_standalone.py` per il merge dei
+  tre moduli, poi incorpora `ARCGIS_CLIENT_ID`/`_SECRET`/
+  `ARCGIS_INTERVENTI_LAYER_URL`/`ARCGIS_ZONA_LAYER_URL` come
+  `os.environ.setdefault(...)` (letti da `.env.charlie` al momento della
+  build).
+- **Bug trovato e corretto durante lo sviluppo**: `CARTELLA_SCRIPT =
+  os.path.dirname(os.path.abspath(__file__))` in un `.exe` PyInstaller
+  `--onefile` punta alla cartella temporanea di estrazione (`_MEIxxxxxx`,
+  cancellata alla chiusura del processo) — non alla cartella reale
+  dell'eseguibile. Usato lì sia per cercare `.env` sia (soprattutto) per
+  la posizione del **file di log**: senza la correzione, il log sarebbe
+  sparito ad ogni riavvio. Corretto con
+  `os.path.dirname(sys.executable) if getattr(sys, "frozen", False) else ...`,
+  e riusato lo stesso `CARTELLA_SCRIPT` (ora corretto) come default di
+  `XML_CARTELLA` — l'eseguibile usa la propria cartella come sorgente degli
+  XML, zero configurazione.
+- Compilato con PyInstaller (`--onefile --noconsole --collect-all tzdata`,
+  quest'ultimo necessario perché altrimenti il fuso orario Europe/Rome non
+  si carica in un `.exe` impacchettato). Output in `dist/` (già in
+  `.gitignore`, sia il `.py` intermedio con le credenziali sia il `.exe`
+  finale non vanno mai committati né condivisi fuori dal PC di destinazione).
+- **Testato end-to-end**: copiato l'`.exe` da solo in una cartella con i due
+  XML di prova, lanciato `--dry-run` (letti 51+6 feature senza toccare la
+  rete), poi lasciato girare in continuo (`--intervallo 5`) per un ciclo
+  reale — scrittura confermata su `_charlie_test` ("51 aggiornati, 0
+  rimossi") e `sync_interventi.log` confermato nella cartella giusta (non in
+  quella temporanea).
+- Chiavetta risistemata: tolti tutti i file precedenti (script, `.env`,
+  `avvia_sync.bat`, XML di test), ora contiene solo `sync_interventi.exe`.
+- **Nota per il PC del comando**: un `.exe` PyInstaller può essere segnalato
+  da Windows Defender/SmartScreen al primo avvio (falso positivo comune);
+  se l'antivirus della rete lo blocca sul serio, va rivalutato (firma del
+  codice, o tornare alla versione a più file).
+- **Trovato un imprevisto non spiegato**: il file `dd.7z` che era nella
+  cartella della chiavetta è sparito durante questa sessione — nessuno dei
+  comandi eseguiti lo nominava esplicitamente. Segnalato a Massi, ancora da
+  chiarire.
+
 ## 21/08/2026 — Ridisegno stato interventi (sospeso), Tag e Zone di competenza
 
 Sessione lunga partita dall'analisi dei due XML reali di una notte di allerta
