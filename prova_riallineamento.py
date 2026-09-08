@@ -50,6 +50,11 @@ sys.modules["arcgis_client"] = finto
 
 import sync_interventi as sync
 
+# Niente chiamate vere a Nominatim durante i test: il centroide del comune
+# (già testato sopra) resta il risultato, esattamente come quando il
+# geocoding non trova nulla in produzione.
+sync._geocodifica = lambda *a, **k: None
+
 CARTELLA = tempfile.mkdtemp(prefix="xml_prova_")
 CHIAMATE = os.path.join(CARTELLA, "chiamate_interventi.XML")
 INTERVENTI = os.path.join(CARTELLA, "interventi.XML")
@@ -483,6 +488,55 @@ controlla_attributo("Comune inventato: ultimo fallback sul comando di Pistoia, n
                      f"C-601-{DATA}", "Latitudine", 43.9333)
 
 shutil.rmtree(CARTELLA_14, ignore_errors=True)
+
+print("\n--- 15. Geocoding: affina il centroide quando lo trova, tenuto in cache per Chiave ---")
+CARTELLA_15 = tempfile.mkdtemp(prefix="xml_prova15_")
+CHIAMATE_15 = os.path.join(CARTELLA_15, "chiamate_interventi.XML")
+INTERVENTI_15 = os.path.join(CARTELLA_15, "interventi.XML")
+open(CHIAMATE_15, "w", encoding="iso-8859-1").write("""<?xml version = '1.0' encoding = 'iso-8859-1'?>
+<ROWSET>
+ <chiamata num="700">
+  <CHIAMATA>700</CHIAMATA>
+  <LOC_IND>Via Geocodificabile</LOC_IND>
+  <CIV_KM NULL="TRUE"/>
+  <COMUNE>Quarrata</COMUNE>
+  <COORD_X NULL="TRUE"/>
+  <COORD_Y NULL="TRUE"/>
+  <SIGLA_PROVINCIA>PT</SIGLA_PROVINCIA>
+  <COD_TIPOLOGIA>1</COD_TIPOLOGIA>
+  <DETTAGLIO_TIPOLOGIA NULL="TRUE"/>
+  <NOTE_INTERVENTO NULL="TRUE"/>
+  <DATA_CHIAMATA>19/08/2026</DATA_CHIAMATA>
+  <ORA_CHIAMATA>10:10</ORA_CHIAMATA>
+  <RICHIEDENTE>x</RICHIEDENTE>
+  <TELE_NUMERO NULL="TRUE"/>
+  <NOME>X</NOME>
+  <COGNOME>Y</COGNOME>
+  <PRIORITA>0</PRIORITA>
+ </chiamata>
+</ROWSET>""")
+open(INTERVENTI_15, "w", encoding="iso-8859-1").write(
+    "<?xml version = '1.0' encoding = 'iso-8859-1'?>\n<ROWSET>\n</ROWSET>")
+
+chiamate_geocoding = []
+def _geocodifica_finta(indirizzo, comune, provincia):
+    chiamate_geocoding.append((indirizzo, comune, provincia))
+    return (43.850123, 11.000456)
+sync._geocodifica = _geocodifica_finta
+
+sync.elabora(CARTELLA_15, "http://finto", forza=True)
+controlla_attributo("il punto del geocoding sostituisce il centroide del comune",
+                     f"C-700-{DATA}", "Latitudine", 43.850123)
+
+sync.elabora(CARTELLA_15, "http://finto", forza=True)
+if len(chiamate_geocoding) == 1:
+    print("[OK ] secondo giro: geocoding non richiamato di nuovo, risultato tenuto in cache")
+else:
+    print(f"[FALLITO] geocoding richiamato {len(chiamate_geocoding)} volte, atteso 1 (manca la cache)")
+    globals()["FALLIMENTI"] = globals().get("FALLIMENTI", 0) + 1
+
+sync._geocodifica = lambda *a, **k: None  # ripristina il no-op per eventuali prove successive
+shutil.rmtree(CARTELLA_15, ignore_errors=True)
 
 falliti = globals().get("FALLIMENTI", 0)
 print(f"\n=== {'TUTTO OK' if not falliti else str(falliti) + ' PROVE FALLITE'} ===")

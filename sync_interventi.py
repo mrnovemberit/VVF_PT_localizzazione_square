@@ -20,6 +20,7 @@ import sys
 import json
 import time
 import hashlib
+import requests
 import logging
 import logging.handlers
 import argparse
@@ -82,10 +83,12 @@ STATI_CHIUSI = tuple(
 
 # Memoria fra un ciclo e l'altro: hash dei file già elaborati, conteggio delle
 # letture vuote consecutive (vedi la guardia anti-svuotamento in riallinea), le
-# note delle chiamate ancora in coda (vedi aggiorna_note_cache) e i poligoni
-# delle zone di competenza (vedi carica_poligoni_zona). "poligoni_zona": None
+# note delle chiamate ancora in coda (vedi aggiorna_note_cache), i poligoni
+# delle zone di competenza (vedi carica_poligoni_zona) e i punti trovati via
+# geocoding per Chiave (vedi affina_posizioni_stimate). "poligoni_zona": None
 # significa "non ancora caricati", [] significa "disattivato/URL non impostato".
-_stato = {"hash": {}, "vuoti_consecutivi": {}, "note_cache": {}, "poligoni_zona": None}
+_stato = {"hash": {}, "vuoti_consecutivi": {}, "note_cache": {}, "poligoni_zona": None,
+          "geocoding_cache": {}}
 
 # Da quanto tempo una nota può restare in cache senza che la chiamata
 # corrispondente sia mai diventata un intervento, prima di essere scartata.
@@ -177,6 +180,81 @@ def carica_poligoni_zona():
         log.info("Zone di competenza caricate: %s poligoni", len(_stato["poligoni_zona"]))
     except Exception:
         log.exception("Impossibile caricare le zone di competenza, riprovo al prossimo ciclo")
+
+
+# ---------------------------------------------------------------------------
+# Geocoding di riserva (Nominatim/OpenStreetMap)
+# ---------------------------------------------------------------------------
+# Affina il centroide del Comune (già calcolato da parser_xml.py) con un
+# punto più preciso quando possibile, usando l'indirizzo. Nominatim: gratuito,
+# nessuna chiave, ma con una politica d'uso rigida (max 1 richiesta al
+# secondo) — rispettata qui con un'attesa minima fra una chiamata e l'altra.
+# Non è un requisito: se il servizio non risponde o non trova l'indirizzo,
+# resta il centroide del Comune già presente, non si perde mai la feature.
+NOMINATIM_URL = "https://nominatim.openstreetmap.org/search"
+NOMINATIM_USER_AGENT = "VVF-PT-sync-interventi/1.0 (uso interno comando VVF Pistoia)"
+GEOCODING_INTERVALLO_MINIMO_S = 1.1
+
+_ultimo_geocoding_ts = [0.0]
+
+
+def _geocodifica(indirizzo, comune, provincia):
+    """Un punto (lat, lon) da Nominatim per indirizzo+comune, o None."""
+    attesa = GEOCODING_INTERVALLO_MINIMO_S - (time.time() - _ultimo_geocoding_ts[0])
+    if attesa > 0:
+        time.sleep(attesa)
+    _ultimo_geocoding_ts[0] = time.time()
+
+    query = ", ".join(p for p in (indirizzo, comune, provincia, "Italia") if p)
+    try:
+        risposta = requests.get(
+            NOMINATIM_URL,
+            params={"q": query, "format": "json", "limit": 1, "countrycodes": "it"},
+            headers={"User-Agent": NOMINATIM_USER_AGENT},
+            timeout=5,
+        )
+        risposta.raise_for_status()
+        risultati = risposta.json()
+    except Exception:
+        log.warning("Geocoding non riuscito per '%s', resto sul centroide del comune", query)
+        return None
+
+    if not risultati:
+        return None
+    return float(risultati[0]["lat"]), float(risultati[0]["lon"])
+
+
+def affina_posizioni_stimate(feature):
+    """
+    Per le feature senza coordinate valide nell'XML (Posizione_stimata="Sì",
+    già sul centroide del Comune), prova a sostituirlo con un punto più
+    preciso via indirizzo. Il centroide resta comunque il fallback: non
+    toglie mai una posizione, la migliora quando ci riesce.
+
+    Risultato (anche un fallimento) tenuto in cache per Chiave: lo stesso
+    indirizzo, mentre la chiamata/l'intervento resta in coda, non va
+    ri-geocodificato ad ogni ciclo — e un indirizzo che oggi non si trova
+    difficilmente si troverà al giro successivo.
+    """
+    for f in feature:
+        attributi = f["attributes"]
+        if attributi.get("Posizione_stimata") != "Sì":
+            continue
+
+        chiave = attributi["Chiave"]
+        if chiave in _stato["geocoding_cache"]:
+            punto = _stato["geocoding_cache"][chiave]
+        else:
+            punto = _geocodifica(
+                attributi.get("Indirizzo"), attributi.get("Comune"), attributi.get("Provincia")
+            )
+            _stato["geocoding_cache"][chiave] = punto
+
+        if punto is None:
+            continue
+        lat, lon = punto
+        attributi["Latitudine"], attributi["Longitudine"] = lat, lon
+        f["geometry"] = {"x": lon, "y": lat, "spatialReference": {"wkid": 4326}}
 
 
 # ---------------------------------------------------------------------------
@@ -350,6 +428,7 @@ def elabora(cartella, layer_urls, forza=False, dry_run=False):
         if dry_run:
             print(json.dumps(feature, ensure_ascii=False, indent=1))
         else:
+            affina_posizioni_stimate(feature)
             for layer_url in layer_urls:
                 riallinea(layer_url, fase, feature)
 

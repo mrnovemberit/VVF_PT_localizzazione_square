@@ -91,9 +91,11 @@ indipendenti e complementari:
 Sviluppo attivo solo su `.env.charlie` (vedi **Decisioni prese**); la
 produzione (`Interventi_chiamate2_PT`) resta ferma al 21/08/2026 come backup.
 
-- [ ] Installare `sync_interventi.exe` sul PC di sala operativa (nella
-      cartella degli XML) e verificare che l'Attività pianificata lo
-      rilanci da sola dopo un riavvio
+- [ ] `sync_interventi.exe` installato su un solo PC di sala operativa
+      (08/09/2026, in osservazione); verificare che l'Attività pianificata
+      lo rilanci da sola dopo un riavvio. Secondo PC (ridondanza, ognuno con
+      copia locale degli XML da SO115) valutato ma rimandato — sicuro per il
+      riallineamento (si autocorregge sui doppioni), vedi diario 08/09
 - [ ] Testare in condizioni reali (non sintetiche, su un ciclo continuo) il
       passaggio di `Note` da una chiamata vera al suo intervento quando
       Oracle la promuove nel corso della notte
@@ -103,6 +105,9 @@ produzione (`Interventi_chiamate2_PT`) resta ferma al 21/08/2026 come backup.
 
 ### Completato
 
+- **Geocoding Nominatim per affinare le posizioni stimate** il 08/09/2026:
+  quando manca COORD_X/Y, prova l'indirizzo prima del centroide del comune
+  (gratuito, senza chiave, cache per `Chiave`). Dettagli nel diario.
 - **Interventi fuori provincia non più scartati** il 03/09/2026: dataset
   nazionale ISTAT (7904 comuni) come fallback quando manca il comune di
   Pistoia; ultima spiaggia sul comando di Pistoia se il comune non si
@@ -118,11 +123,6 @@ produzione (`Interventi_chiamate2_PT`) resta ferma al 21/08/2026 come backup.
   (sotto-invii `/1`/`/2` duplicavano il pin, coordinate mancanti facevano
   sparire interventi attivi); nuovi campi `Tag`, `Zona_competenza`,
   `Area_emergenza`. Tutto provato solo su `.env.charlie`. Dettagli nel diario.
-- **Flusso 2 in produzione sul PC di sala operativa** il 21/08/2026: due bug
-  reali scoperti sui dati veri e risolti (Chiave non univoca — il numero
-  chiamata riparte ogni notte — e orari con suffisso `-s` che si perdevano
-  nel parsing), scrittura e Attività pianificata verificate attive.
-  Dettagli nel diario.
 
 ## Decisioni prese (e perché)
 

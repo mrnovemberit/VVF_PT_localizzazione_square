@@ -1,6 +1,92 @@
 # Diario di sessione
 
-## 03/09/2026 — Allineamento campi su charlie, file unico per la chiavetta, colore dashboard
+## 08/09/2026 — Geocoding Nominatim per affinare le posizioni stimate, discussione su ridondanza multi-PC
+
+Sessione breve, ripresa da quella del 03/09. Partita da una domanda esplorativa
+di Massi: visto che il fallback su centroide del comune (Italia intera, aggiunto
+il 03/09) funziona ma resta impreciso a livello di comune, si può ottenere una
+posizione più precisa dall'indirizzo? Discusso il tradeoff ArcGIS World
+Geocoding Service (a pagamento oltre la soglia gratuita, stesso ecosistema)
+contro un'alternativa Python senza ArcGIS — scelto **Nominatim/OpenStreetMap**
+(gratuito, nessuna chiave, compatibile con `requests` già in uso).
+
+**Implementato in `sync_interventi.py`** (non in `parser_xml.py`, che resta
+volutamente senza rete e collaudabile a secco):
+
+- `_geocodifica(indirizzo, comune, provincia)`: `requests.get` verso
+  `nominatim.openstreetmap.org/search`, `User-Agent` dedicato, timeout 5s.
+  Rispetta il limite di Nominatim di 1 richiesta/secondo con un'attesa minima
+  fra chiamate consecutive (stato in `_ultimo_geocoding_ts`, un modulo-level
+  mutable list per evitare `global`). Qualunque eccezione o risultato vuoto
+  ritorna `None` — non deve mai far fallire il ciclo.
+- `affina_posizioni_stimate(feature)`: per ogni feature con
+  `Posizione_stimata == "Sì"` (già sul centroide, calcolato da parser_xml.py),
+  prova a sostituirlo con il punto trovato da Nominatim. Risultato (anche
+  `None`, cioè un fallimento) tenuto in cache per `Chiave` in
+  `_stato["geocoding_cache"]`: lo stesso indirizzo non viene ri-interrogato
+  ad ogni ciclo mentre la chiamata resta in coda, e un indirizzo che oggi non
+  si trova (es. i casi già visti di indirizzi scritti male) non viene
+  ritentato inutilmente finché quella `Chiave` esiste.
+- Agganciato in `elabora()` **solo nel ramo non-dry-run**, subito prima di
+  `riallinea()`: il `--dry-run` resta senza rete per nessun motivo, come da
+  principio esistente.
+- **Nessuna dipendenza nuova** (solo `requests`, già presente), **nessun
+  campo nuovo sul layer** (scrive sugli stessi `Latitudine`/`Longitudine`/
+  geometria di sempre) — tenuto deliberatamente leggero su richiesta di
+  Massi ("la gestione rimanga comunque leggera").
+
+**Bug evitato in fase di test**: `prova_riallineamento.py` chiama
+`sync.elabora(..., forza=True)` senza `dry_run=True` in tutti i test
+esistenti — senza accorgimenti, l'aggancio in `elabora()` avrebbe fatto
+**chiamate di rete vere a Nominatim durante ogni lancio della suite**,
+rompendo il principio "niente rete nei test" (oltre a essere lento, per il
+rate limit di 1/s). Risolto con uno stub, stesso stile del finto
+`arcgis_client` già in uso: `sync._geocodifica = lambda *a, **k: None` subito
+dopo l'import — i test restano sul centroide, esattamente come quando il
+geocoding non trova nulla in produzione.
+
+**Nuovo test 15** (ora 15/15 verdi): con `sync._geocodifica` sostituita da
+una finta che ritorna un punto noto, verifica che (a) il punto sostituisca
+il centroide e (b) un secondo giro sullo stesso indirizzo non richiami di
+nuovo la funzione (cache per `Chiave` verificata con un contatore di
+chiamate).
+
+**Verificato dal vivo** contro `_charlie_test` con `--once` (rete vera,
+Nominatim vero): confrontando le coordinate scritte con i valori grezzi di
+`COMUNE_CENTROIDI`/dataset nazionale, diversi indirizzi reali sono stati
+affinati (es. "Via del Pino, Pieve a Nievole" → 43.9046705,10.806137 invece
+del centroide 43.8992,10.8078; "Piazza Vittorio Veneto, Larciano" →
+43.8245481,10.8776346 invece di 43.8347,10.8656). Gli indirizzi illeggibili
+già noti dal 21/08 (`"zoobivio montagnanatorbecchia (*)"`,
+`"via bustichinivia della torretta (*)"`) sono ricaduti correttamente sul
+fallback esistente (comando di Pistoia il primo, centroide di
+Montecatini-Terme il secondo) — Nominatim non li trova, come atteso, e il
+codice non si è rotto.
+
+Rigenerati e riverificati `dist/sync_interventi.py` e `sync_interventi.exe`
+con la modifica; exe ricopiato sulla chiavetta.
+
+**Discussione su ridondanza multi-PC** (nessuna modifica al codice): Massi
+ha chiesto se installare l'exe su più postazioni di sala operativa in
+parallelo (non tutte sempre presidiate) per garantire che almeno una sia
+attiva. Chiarito che sono due PC distinti, ognuno con una propria copia
+locale degli XML scritti dal software di sala operativa SO115 (dati
+equivalenti fra i due, non lo stesso file). Analisi: il rischio reale è una
+corsa sulla stessa `Chiave` fra due scritture quasi simultanee, ma
+`riallinea()` **si autocorregge già** al giro successivo (la guardia
+doppioni, pensata per un altro scenario, copre anche questo) — quindi
+nel caso peggiore un pin sfarfalla per un ciclo, non un dato corrotto in modo
+permanente. Segnalato anche: il rate limit di Nominatim è rispettato per
+processo, non in aggregato fra più macchine (rischio basso al loro volume,
+ma non garantito), e i log restano locali a ciascun PC. Proposta
+un'alternativa più diretta al problema di fondo — Attività pianificata
+**"Indipendentemente dal fatto che l'utente esegua l'accesso"**, girando
+come account SYSTEM per evitare di salvare una password, così un solo PC
+sempre acceso basterebbe senza bisogno di nessun operatore loggato — ma
+richiede diritti da amministratore che potrebbero non essere disponibili.
+**Decisione di Massi**: per ora resta su un solo PC, valuta se tenere così
+prima di eventualmente aggiungere il secondo.
+ — Allineamento campi su charlie, file unico per la chiavetta, colore dashboard
 
 Sessione partita dal ripopolare `Interventi_chiamate_PT_charlie_test` con i due
 XML reali portati su chiavetta (`chiamate_interventi_test.XML` /
