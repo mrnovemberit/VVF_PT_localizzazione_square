@@ -119,13 +119,13 @@ def upsert_position(operator_id: str, operator_name: str, lat: float, lon: float
 # Risposte del bot
 # ---------------------------------------------------------------------------
 MESSAGGIO_BENVENUTO = (
-    "Benvenuto nel tracking posizione VVF Pistoia.\n\n"
-    "Per farti vedere sulla mappa:\n"
+    "Benvenuto nel Tracciatore di posizione per SO di VVF Pistoia.\n\n"
     "1. Tocca la graffetta (📎) in questa chat\n"
     "2. Scegli «Posizione»\n"
-    "3. Tocca «Condividi posizione in tempo reale»\n"
-    "4. Come durata scegli «Fino a disattivazione»\n\n"
-    "Per smettere, in questa chat tocca «Interrompi condivisione»."
+    "3. Tocca «Posizione in tempo reale...»\n"
+    "4. Selezione «Fino a disattivazione»\n"
+    "5. Clicca su «Condividi»\n\n\n"
+    "Per interrompere, in questa chat tocca «Interrompi condivisione»"
 )
 
 
