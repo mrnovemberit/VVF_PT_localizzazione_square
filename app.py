@@ -8,6 +8,7 @@ import os
 import time
 import math
 import logging
+import requests
 from flask import Flask, request, jsonify
 
 from arcgis_client import query_features, apply_edits
@@ -115,6 +116,33 @@ def upsert_position(operator_id: str, operator_name: str, lat: float, lon: float
 
 
 # ---------------------------------------------------------------------------
+# Risposte del bot
+# ---------------------------------------------------------------------------
+MESSAGGIO_BENVENUTO = (
+    "Benvenuto nel tracking posizione VVF Pistoia.\n\n"
+    "Per farti vedere sulla mappa:\n"
+    "1. Tocca la graffetta (📎) in questa chat\n"
+    "2. Scegli «Posizione»\n"
+    "3. Tocca «Condividi posizione in tempo reale»\n"
+    "4. Come durata scegli «Fino a disattivazione»\n\n"
+    "Per smettere, in questa chat tocca «Interrompi condivisione»."
+)
+
+
+def invia_messaggio(chat_id, testo):
+    """Manda un messaggio dal bot. Un errore qui non deve mai bloccare il webhook."""
+    try:
+        resp = requests.post(
+            f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage",
+            data={"chat_id": chat_id, "text": testo},
+            timeout=10,
+        )
+        resp.raise_for_status()
+    except Exception:
+        log.exception("Impossibile inviare il messaggio di benvenuto")
+
+
+# ---------------------------------------------------------------------------
 # Webhook Telegram
 # ---------------------------------------------------------------------------
 @app.route("/telegram-webhook", methods=["POST"])
@@ -133,6 +161,13 @@ def telegram_webhook():
     message = update.get("message") or update.get("edited_message")
     if not message:
         return jsonify({"ok": True})  # update non rilevante, ignoralo
+
+    # Primo avvio della chat (link t.me/...?start=vvf o pulsante Avvia):
+    # rispondiamo con le istruzioni per condividere la posizione
+    testo = message.get("text", "")
+    if testo.startswith("/start") and message.get("chat", {}).get("id"):
+        invia_messaggio(message["chat"]["id"], MESSAGGIO_BENVENUTO)
+        return jsonify({"ok": True})
 
     location = message.get("location")
     if not location:

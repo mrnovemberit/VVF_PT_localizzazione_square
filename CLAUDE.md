@@ -213,6 +213,7 @@ parser — esclusione alla fonte, non un filtro sulla mappa.
 
 ## Stack tecnico
 
+- Bot Telegram: `@Vvf_Pistoia_tracking_bot` — link di avvio per la squadra: `https://t.me/Vvf_Pistoia_tracking_bot?start=vvf` (il nome utente è pubblico, non è un segreto; il token resta in `.env`)
 - Python 3, Flask, libreria `requests`
 - Deploy: Render (piano free, servizio web), region Frankfurt — live su
   `https://vvf-pt-localizzazione-square.onrender.com`
